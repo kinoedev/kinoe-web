@@ -1,0 +1,65 @@
+import Link from "next/link"
+
+const nav = [
+  { href: "/terminal", label: "Terminal" },
+  { href: "/charts", label: "Charts" },
+  { href: "/signals", label: "Signals" },
+  { href: "/journal", label: "Journal" },
+  { href: "/settings", label: "Settings" },
+]
+
+export default function Shell({
+  title,
+  subtitle,
+  children,
+}: {
+  title?: string
+  subtitle?: string
+  children: React.ReactNode
+}) {
+  return (
+    <div className="min-h-screen bg-black text-zinc-100">
+      <div className="pointer-events-none fixed inset-0 opacity-70">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_25%,rgba(124,58,237,0.28),transparent_55%)]" />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_70%_60%,rgba(168,85,247,0.18),transparent_55%)]" />
+      </div>
+
+      <header className="relative mx-auto flex w-full max-w-6xl items-center justify-between px-6 py-6">
+        <Link href="/" className="tracking-[0.45em] text-zinc-200">
+          K I N O E
+        </Link>
+
+        <nav className="hidden gap-6 text-sm text-zinc-300 md:flex">
+          {nav.map((i) => (
+            <Link
+              key={i.href}
+              href={i.href}
+              className="transition hover:text-white"
+            >
+              {i.label}
+            </Link>
+          ))}
+        </nav>
+      </header>
+
+      <main className="relative mx-auto w-full max-w-6xl px-6 pb-16">
+        {(title || subtitle) && (
+          <div className="mb-8">
+            {title && (
+              <h1 className="text-2xl font-semibold text-zinc-100">
+                {title}
+              </h1>
+            )}
+            {subtitle && (
+              <p className="mt-2 text-sm text-zinc-400">{subtitle}</p>
+            )}
+          </div>
+        )}
+
+        <div className="rounded-2xl border border-zinc-800 bg-zinc-950/60 p-6 shadow-[0_0_80px_rgba(124,58,237,0.12)]">
+          {children}
+        </div>
+      </main>
+    </div>
+  )
+}
