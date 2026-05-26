@@ -62,7 +62,6 @@ export default function Sidebar(_props: SidebarProps = {}) {
 
   const navItems = [
     { label: "Terminal", href: "/terminal" },
-    { label: "IG Markets", href: "/ig-markets" },
     { label: "Charts", href: "/charts" },
     { label: "Signals", href: "/signals" },
     { label: "Journal", href: "/journal" },
