@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
 
+const OANDA_BASE_URL = process.env.OANDA_ENV === "live"
+  ? "https://api-fxtrade.oanda.com"
+  : "https://api-fxpractice.oanda.com";
+
 export async function GET() {
   const apiKey = process.env.OANDA_API_KEY;
   const accountId = process.env.OANDA_ACCOUNT_ID;
@@ -14,8 +18,7 @@ export async function GET() {
     );
   }
 
-  const baseUrl = "https://api-fxpractice.oanda.com";
-  const url = `${baseUrl}/v3/accounts/${accountId}/summary`;
+  const url = `${OANDA_BASE_URL}/v3/accounts/${accountId}/summary`;
 
   try {
     const res = await fetch(url, {
@@ -44,13 +47,8 @@ export async function GET() {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
-  } catch (error: any) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error: error?.message || "Unexpected error",
-      },
-      { status: 500 }
-    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unexpected error";
+    return NextResponse.json({ ok: false, error: message }, { status: 500 });
   }
 }

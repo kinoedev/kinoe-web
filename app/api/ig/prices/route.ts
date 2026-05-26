@@ -4,14 +4,15 @@ const IG_BASE_URL = process.env.IG_DEMO === "true"
   ? "https://demo-api.ig.com/gateway/deal"
   : "https://api.ig.com/gateway/deal";
 
-// Module-level session cache (survives across requests in the same process)
-let igSession: { cst: string; token: string; expiresAt: number } | null = null;
+type IgSession = { cst: string; token: string };
 
-async function getSession(): Promise<{ cst: string; token: string }> {
-  if (igSession && Date.now() < igSession.expiresAt) {
-    return { cst: igSession.cst, token: igSession.token };
-  }
+// Module-level session cache (survives across requests in the same process).
+// `sessionPromise` deduplicates concurrent logins so we don't hammer IG's
+// /session endpoint and get rate-limited.
+let igSession: (IgSession & { expiresAt: number }) | null = null;
+let sessionPromise: Promise<IgSession> | null = null;
 
+async function doLogin(): Promise<IgSession> {
   const apiKey = process.env.IG_API_KEY;
   const identifier = process.env.IG_IDENTIFIER;
   const password = process.env.IG_PASSWORD;
@@ -43,9 +44,34 @@ async function getSession(): Promise<{ cst: string; token: string }> {
     throw new Error("IG login succeeded but missing CST or X-SECURITY-TOKEN headers");
   }
 
-  // Cache for 5.5 hours (IG sessions expire after 6 hours of inactivity)
   igSession = { cst, token, expiresAt: Date.now() + 5.5 * 60 * 60 * 1000 };
   return { cst, token };
+}
+
+async function getSession(): Promise<IgSession> {
+  if (igSession && Date.now() < igSession.expiresAt) {
+    return { cst: igSession.cst, token: igSession.token };
+  }
+  if (sessionPromise) return sessionPromise;
+  sessionPromise = doLogin().finally(() => {
+    sessionPromise = null;
+  });
+  return sessionPromise;
+}
+
+async function fetchMarkets(epics: string[], session: IgSession, apiKey: string) {
+  const url = `${IG_BASE_URL}/markets?epics=${epics.map(encodeURIComponent).join(",")}`;
+  return fetch(url, {
+    method: "GET",
+    headers: {
+      "X-IG-API-KEY": apiKey,
+      CST: session.cst,
+      "X-SECURITY-TOKEN": session.token,
+      "Content-Type": "application/json",
+      Version: "1",
+    },
+    cache: "no-store",
+  });
 }
 
 const DEFAULT_EPICS = [
@@ -68,50 +94,14 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url);
   const epicsParam = searchParams.get("epics");
-  const epics = epicsParam ? epicsParam.split(",") : DEFAULT_EPICS;
+  const epics = epicsParam ? epicsParam.split(",").slice(0, 50) : DEFAULT_EPICS;
 
   try {
-    const { cst, token } = await getSession();
-
-    const url = `${IG_BASE_URL}/markets?epics=${epics.join(",")}`;
-    const res = await fetch(url, {
-      method: "GET",
-      headers: {
-        "X-IG-API-KEY": apiKey,
-        CST: cst,
-        "X-SECURITY-TOKEN": token,
-        "Content-Type": "application/json",
-        Version: "1",
-      },
-      cache: "no-store",
-    });
+    let res = await fetchMarkets(epics, await getSession(), apiKey);
 
     if (res.status === 401) {
-      // Session expired — invalidate cache and retry once
       igSession = null;
-      const { cst: cst2, token: token2 } = await getSession();
-      const retry = await fetch(url, {
-        method: "GET",
-        headers: {
-          "X-IG-API-KEY": apiKey,
-          CST: cst2,
-          "X-SECURITY-TOKEN": token2,
-          "Content-Type": "application/json",
-          Version: "1",
-        },
-        cache: "no-store",
-      });
-
-      if (!retry.ok) {
-        const body = await retry.text();
-        return NextResponse.json(
-          { ok: false, error: `IG markets fetch failed (${retry.status})`, body },
-          { status: retry.status }
-        );
-      }
-
-      const data = await retry.json();
-      return NextResponse.json({ ok: true, markets: data.marketDetails ?? [] });
+      res = await fetchMarkets(epics, await getSession(), apiKey);
     }
 
     if (!res.ok) {
@@ -124,10 +114,8 @@ export async function GET(req: NextRequest) {
 
     const data = await res.json();
     return NextResponse.json({ ok: true, markets: data.marketDetails ?? [] });
-  } catch (err: any) {
-    return NextResponse.json(
-      { ok: false, error: err?.message ?? "Unexpected error" },
-      { status: 500 }
-    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unexpected error";
+    return NextResponse.json({ ok: false, error: message }, { status: 500 });
   }
 }
