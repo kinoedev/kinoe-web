@@ -18,7 +18,7 @@ type SignalResponse = {
 };
 
 type SignalPanelProps = {
-  agentOnline: boolean;
+  agentOnline?: boolean;
 };
 
 function FieldCard(props: { label: string; value: string; tag?: string }) {

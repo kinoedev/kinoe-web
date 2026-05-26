@@ -1,4 +1,8 @@
-export default function Topbar() {
+type TopbarProps = {
+  agentOnline?: boolean;
+};
+
+export default function Topbar({ agentOnline }: TopbarProps = {}) {
   return (
     <header className="flex items-center justify-between border-b border-white/10 bg-black/30 px-6 py-4 backdrop-blur-xl">
       <div>
@@ -7,6 +11,17 @@ export default function Topbar() {
       </div>
 
       <div className="flex items-center gap-3">
+        {agentOnline !== undefined ? (
+          <div
+            className={`rounded-full border px-3 py-1 text-xs ${
+              agentOnline
+                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
+                : "border-red-500/30 bg-red-500/10 text-red-200"
+            }`}
+          >
+            {agentOnline ? "Agent online" : "Agent offline"}
+          </div>
+        ) : null}
         <div className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/70">
           ENV: local
         </div>

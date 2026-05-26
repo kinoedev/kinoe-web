@@ -10,7 +10,12 @@ type AgentStatus = {
   error?: string;
 };
 
-export default function Sidebar() {
+type SidebarProps = {
+  agentOnline?: boolean;
+  lastCheckedAt?: number | null;
+};
+
+export default function Sidebar(_props: SidebarProps = {}) {
   const pathname = usePathname();
 
   const [status, setStatus] = useState<AgentStatus | null>(null);
