@@ -13,12 +13,16 @@ async function main() {
   if (!url) throw new Error("Set DATABASE_URL or POSTGRES_URL");
 
   const sql = neon(url);
-  const schema = readFileSync(join(process.cwd(), "lib/db/schema.sql"), "utf8");
+  const rawSchema = readFileSync(join(process.cwd(), "lib/db/schema.sql"), "utf8");
+  const schema = rawSchema
+    .split("\n")
+    .filter((line) => !line.trim().startsWith("--"))
+    .join("\n");
 
   const statements = schema
     .split(/;\s*\n/)
     .map((s) => s.trim())
-    .filter((s) => s.length > 0 && !s.startsWith("--"));
+    .filter((s) => s.length > 0);
 
   for (const stmt of statements) {
     process.stdout.write(`Applying: ${stmt.slice(0, 60).replace(/\s+/g, " ")}...`);
