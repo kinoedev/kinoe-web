@@ -41,6 +41,17 @@ export async function POST() {
     );
 
     // Step 2: AI summaries only — no invented values
+    // Set AI_SKIP=true in .env.local to bypass AI during local testing
+    if (process.env.AI_SKIP === "true") {
+      return NextResponse.json({
+        ok: true,
+        scanned_at: new Date().toISOString(),
+        overallSummary: "[AI skipped — rule engine results only]",
+        pairs: analyses.map((a) => ({ ...a, aiSummary: "" })),
+        meta: { model: "none", cost_usd: 0, input_tokens: 0, output_tokens: 0 },
+      });
+    }
+
     const aiResult = await summariseWithAI(analyses);
 
     // Step 3: Merge AI summaries into analysis results
