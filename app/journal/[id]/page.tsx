@@ -20,6 +20,7 @@ export default function JournalEntryPage({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [savingPatch, setSavingPatch] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
 
   const [outcome, setOutcome] = useState<Outcome | "">("");
   const [exitPrice, setExitPrice] = useState("");
@@ -50,6 +51,7 @@ export default function JournalEntryPage({
     e.preventDefault();
     setSavingPatch(true);
     setSaveError(null);
+    setSavedAt(null);
 
     const patch: UpdateJournalEntry = {
       outcome: (outcome || null) as Outcome | null,
@@ -66,8 +68,9 @@ export default function JournalEntryPage({
         body: JSON.stringify(patch),
       });
       const data = await res.json();
-      if (!res.ok || !data?.ok) throw new Error(data?.error || "Failed to save");
+      if (!res.ok || !data?.ok) throw new Error(data?.error || `Failed to save (HTTP ${res.status})`);
       setEntry(data.entry);
+      setSavedAt(Date.now());
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : "Failed to save");
     } finally {
@@ -195,6 +198,12 @@ export default function JournalEntryPage({
                   {saveError ? (
                     <div className="mt-3 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-200">
                       {saveError}
+                    </div>
+                  ) : null}
+
+                  {savedAt && !saveError ? (
+                    <div className="mt-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs text-emerald-200">
+                      Saved at {new Date(savedAt).toLocaleTimeString()} · outcome {entry.outcome ?? "—"} · exit {entry.exit_price ?? "—"} · R {entry.r_multiple ?? "—"}
                     </div>
                   ) : null}
 
