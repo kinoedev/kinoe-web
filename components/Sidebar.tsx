@@ -8,6 +8,9 @@ type AgentStatus = {
   ok?: boolean;
   agent?: string;
   error?: string;
+  balance?: string | null;
+  currency?: string | null;
+  nav?: string | null;
 };
 
 type SidebarProps = {
@@ -48,7 +51,7 @@ export default function Sidebar(_props: SidebarProps = {}) {
         setLastCheckedAt(Date.now());
       } finally {
         if (!alive) return;
-        timer = setTimeout(poll, 5000);
+        timer = setTimeout(poll, 60000);
       }
     };
 
@@ -105,22 +108,24 @@ export default function Sidebar(_props: SidebarProps = {}) {
               ].join(" ")}
             />
             <div className="text-sm font-medium text-white">
-              {isOnline ? "Agent online" : "Agent offline"}
+              {isOnline ? "OANDA connected" : "OANDA offline"}
             </div>
           </div>
 
-          <div className="mt-2 text-xs text-white/45">
-            {isOnline ? "Connected to n8n." : "We will connect n8n and OANDA next."}
-          </div>
+          {isOnline && status?.balance ? (
+            <div className="mt-2 text-xs text-white/60">
+              {status.currency} {Number(status.balance).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </div>
+          ) : null}
 
           {status?.error ? (
-            <div className="mt-3 text-[11px] text-red-300/80">
+            <div className="mt-2 text-[11px] text-red-300/70">
               {String(status.error)}
             </div>
           ) : null}
 
-          <div className="mt-3 text-[11px] text-white/35">
-            {lastCheckedAt ? `Checked ${new Date(lastCheckedAt).toLocaleTimeString()}` : "Checking..."}
+          <div className="mt-2 text-[11px] text-white/30">
+            {lastCheckedAt ? `Checked ${new Date(lastCheckedAt).toLocaleTimeString()}` : "Connecting..."}
           </div>
         </div>
       </div>

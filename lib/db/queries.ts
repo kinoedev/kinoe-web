@@ -22,7 +22,8 @@ export async function createJournalEntry(input: NewJournalEntry): Promise<Journa
       entry_price, stop_loss, take_profit, risk_reward,
       position_size, risk_pct,
       entered_at, thesis_md,
-      emotion_tags, chart_urls
+      emotion_tags, chart_urls,
+      source
     ) VALUES (
       ${input.pair}, ${input.timeframe}, ${input.direction},
       ${input.setup_type ?? null}, ${input.bias ?? null},
@@ -30,11 +31,30 @@ export async function createJournalEntry(input: NewJournalEntry): Promise<Journa
       ${input.take_profit ?? null}, ${input.risk_reward ?? null},
       ${input.position_size ?? null}, ${input.risk_pct ?? null},
       ${input.entered_at ?? null}, ${input.thesis_md ?? null},
-      ${input.emotion_tags ?? []}, ${input.chart_urls ?? []}
+      ${input.emotion_tags ?? []}, ${input.chart_urls ?? []},
+      ${input.source ?? "manual"}
     )
     RETURNING *
   `;
   return rows[0] as JournalEntry;
+}
+
+export async function findRecentAgentSignal(
+  pair: string,
+  timeframe: string,
+  entryPrice: number
+): Promise<JournalEntry | null> {
+  const rows = await sql`
+    SELECT * FROM journal_entries
+    WHERE source = 'agent_signal'
+      AND pair = ${pair}
+      AND timeframe = ${timeframe}
+      AND entry_price = ${entryPrice}
+      AND created_at > now() - interval '4 hours'
+    ORDER BY created_at DESC
+    LIMIT 1
+  `;
+  return (rows[0] as JournalEntry) ?? null;
 }
 
 export async function updateJournalEntry(

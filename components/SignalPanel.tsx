@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 
 type SignalResponse = {
   ok?: boolean;
@@ -17,9 +18,7 @@ type SignalResponse = {
   reason?: string;
 };
 
-type SignalPanelProps = {
-  agentOnline?: boolean;
-};
+type SignalPanelProps = Record<string, never>;
 
 function FieldCard(props: { label: string; value: string; tag?: string }) {
   return (
@@ -44,16 +43,23 @@ function formatNumber(value: number | null | undefined) {
   return value.toString();
 }
 
-export default function SignalPanel({ agentOnline }: SignalPanelProps) {
+type LogResult = { logged: boolean; reason?: string; existing_id?: string; entry?: { id: string } };
+
+export default function SignalPanel(_props: SignalPanelProps) {
   const [signal, setSignal] = useState<SignalResponse | null>(null);
   const [loading, setLoading] = useState(false);
-  const [lastCheckedAt, setLastCheckedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const [logging, setLogging] = useState(false);
+  const [logResult, setLogResult] = useState<LogResult | null>(null);
+  const [logError, setLogError] = useState<string | null>(null);
 
   async function loadSignal() {
     try {
       setLoading(true);
       setError(null);
+      setLogResult(null);
+      setLogError(null);
 
       const res = await fetch("/api/agent/signal", {
         method: "GET",
@@ -68,12 +74,26 @@ export default function SignalPanel({ agentOnline }: SignalPanelProps) {
       }
 
       setSignal(data);
-      setLastCheckedAt(Date.now());
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load signal");
-      setLastCheckedAt(Date.now());
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function logToJournal() {
+    setLogging(true);
+    setLogError(null);
+    setLogResult(null);
+    try {
+      const res = await fetch("/api/agent/signal/log", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok || !data?.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+      setLogResult(data as LogResult);
+    } catch (err) {
+      setLogError(err instanceof Error ? err.message : "Log failed");
+    } finally {
+      setLogging(false);
     }
   }
 
@@ -81,7 +101,6 @@ export default function SignalPanel({ agentOnline }: SignalPanelProps) {
     loadSignal();
   }, []);
 
-  const statusText = agentOnline ? "Agent online" : "Agent offline";
   const setupText = signal?.isValidSetup ? "Valid setup found" : "No valid setup";
 
   return (
@@ -90,18 +109,16 @@ export default function SignalPanel({ agentOnline }: SignalPanelProps) {
         <div>
           <div className="text-sm text-white/80">Signals</div>
           <div className="mt-1 text-xs text-white/40">
-            Live agent output from your signal route
+            Live signal scan — EUR/USD H4
           </div>
         </div>
 
-        <div
-          className={`rounded-full border px-3 py-1 text-[10px] ${
-            agentOnline
-              ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
-              : "border-red-500/30 bg-red-500/10 text-red-200"
-          }`}
-        >
-          {statusText}
+        <div className={`rounded-full border px-3 py-1 text-[10px] ${
+          signal?.isValidSetup
+            ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
+            : "border-white/10 bg-white/5 text-white/50"
+        }`}>
+          {setupText}
         </div>
       </div>
 
@@ -112,6 +129,34 @@ export default function SignalPanel({ agentOnline }: SignalPanelProps) {
       >
         {loading ? "Scanning..." : "Run signal scan"}
       </button>
+
+      {signal?.isValidSetup ? (
+        <button
+          onClick={logToJournal}
+          disabled={logging}
+          className="mt-2 w-full rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {logging ? "Logging..." : "Log to journal"}
+        </button>
+      ) : null}
+
+      {logResult ? (
+        <div className={`mt-3 rounded-xl border p-3 text-xs ${logResult.logged ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200" : "border-white/10 bg-white/5 text-white/50"}`}>
+          {logResult.logged && logResult.entry ? (
+            <>Signal logged. <Link href={`/journal/${logResult.entry.id}`} className="underline text-emerald-300">View entry</Link></>
+          ) : logResult.existing_id ? (
+            <>Already logged this window. <Link href={`/journal/${logResult.existing_id}`} className="underline text-white/70">View entry</Link></>
+          ) : (
+            logResult.reason ?? "No valid setup to log."
+          )}
+        </div>
+      ) : null}
+
+      {logError ? (
+        <div className="mt-3 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-200">
+          {logError}
+        </div>
+      ) : null}
 
       {error ? (
         <div className="mt-4 rounded-xl border border-red-500/20 bg-red-500/10 p-4 text-xs leading-5 text-red-200">

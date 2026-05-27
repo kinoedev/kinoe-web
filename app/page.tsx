@@ -1,55 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
-
 import Sidebar from "@/components/Sidebar";
 import Topbar from "@/components/Topbar";
 import ChartPanel from "@/components/ChartPanel";
 import SignalPanel from "@/components/SignalPanel";
 
-type AgentStatusResponse = {
-  ok?: boolean;
-  agent?: "online" | "offline" | string;
-};
-
 export default function TerminalPage() {
-  const [agentOnline, setAgentOnline] = useState<boolean>(false);
-  const [lastCheckedAt, setLastCheckedAt] = useState<number | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function checkStatus() {
-      try {
-        const res = await fetch("/api/agent/status", {
-          method: "GET",
-          cache: "no-store",
-          headers: { Accept: "application/json" },
-        });
-
-        const data = (await res.json()) as AgentStatusResponse;
-
-        if (cancelled) return;
-
-        const isOnline = data?.agent === "online";
-        setAgentOnline(isOnline);
-        setLastCheckedAt(Date.now());
-      } catch {
-        if (cancelled) return;
-        setAgentOnline(false);
-        setLastCheckedAt(Date.now());
-      }
-    }
-
-    checkStatus();
-    const interval = setInterval(checkStatus, 5000);
-
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
-  }, []);
-
   return (
     <div className="min-h-screen bg-black text-white">
       <div className="pointer-events-none absolute inset-0">

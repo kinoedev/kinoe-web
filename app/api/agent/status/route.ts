@@ -1,36 +1,44 @@
-import { NextResponse } from "next/server"
+import { NextResponse } from "next/server";
 
 export async function GET() {
-  const url = process.env.N8N_STATUS_URL
-  const secret = process.env.N8N_SHARED_SECRET
+  const apiKey = process.env.OANDA_API_KEY;
+  const accountId = process.env.OANDA_ACCOUNT_ID;
+  const accountType = process.env.OANDA_ACCOUNT_TYPE || "practice";
 
-  if (!url) {
-    return NextResponse.json(
-      { ok: false, error: "Missing N8N_STATUS_URL" },
-      { status: 500 }
-    )
+  if (!apiKey || !accountId) {
+    return NextResponse.json({ ok: false, agent: "offline", error: "OANDA not configured" });
   }
 
+  const baseUrl =
+    accountType === "live"
+      ? "https://api-fxtrade.oanda.com"
+      : "https://api-fxpractice.oanda.com";
+
   try {
-    const res = await fetch(url, {
-      method: "GET",
-      headers: {
-        "x-kinoe-secret": secret ?? "",
-        Accept: "application/json",
-      },
+    const res = await fetch(`${baseUrl}/v3/accounts/${accountId}/summary`, {
+      headers: { Authorization: `Bearer ${apiKey}`, Accept: "application/json" },
       cache: "no-store",
-    })
+    });
 
-    const text = await res.text()
+    if (!res.ok) {
+      return NextResponse.json({ ok: false, agent: "offline", error: `OANDA ${res.status}` });
+    }
 
-    return new NextResponse(text, {
-      status: res.status,
-      headers: { "Content-Type": "application/json" },
-    })
-  } catch (err: any) {
-    return NextResponse.json(
-      { ok: false, error: err?.message ?? "Unknown error" },
-      { status: 500 }
-    )
+    const data = await res.json();
+    const acct = data?.account;
+
+    return NextResponse.json({
+      ok: true,
+      agent: "online",
+      balance: acct?.balance ?? null,
+      currency: acct?.currency ?? null,
+      nav: acct?.NAV ?? null,
+    });
+  } catch (err) {
+    return NextResponse.json({
+      ok: false,
+      agent: "offline",
+      error: err instanceof Error ? err.message : "OANDA unreachable",
+    });
   }
 }

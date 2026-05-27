@@ -63,6 +63,7 @@ export type NewJournalEntry = {
   thesis_md?: string | null;
   emotion_tags?: string[];
   chart_urls?: string[];
+  source?: string;
 };
 
 export type UpdateJournalEntry = Partial<{
