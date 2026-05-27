@@ -1,24 +1,9 @@
 import { NextResponse } from "next/server";
-import {
-  parseCandles,
-  getTrendBias,
-  detectKangarooTail,
-  detectBigShadow,
-  detectInsideBar,
-  extractKeyLevels,
-} from "@/lib/signals/detection";
-import { scanMarketsWithAI } from "@/lib/ai/scanner";
+import { parseCandles, runFullPairAnalysis } from "@/lib/signals/detection";
+import { summariseWithAI } from "@/lib/ai/scanner";
+import type { PairAnalysisResult } from "@/lib/signals/detection";
 
 const PAIRS = ["EUR_USD", "GBP_USD", "XAU_USD"];
-
-function getD1Bias(candles: ReturnType<typeof parseCandles>): string {
-  const recent = candles.slice(-10);
-  if (recent.length < 10) return "NEUTRAL";
-  const change = (recent[recent.length - 1].close - recent[0].close) / recent[0].close;
-  if (change > 0.005) return "BULL";
-  if (change < -0.005) return "BEAR";
-  return "NEUTRAL";
-}
 
 export async function POST() {
   try {
@@ -33,7 +18,8 @@ export async function POST() {
         ? "https://api-fxtrade.oanda.com"
         : "https://api-fxpractice.oanda.com";
 
-    const pairData = await Promise.all(
+    // Step 1: Fetch candles + run rule engine for all pairs
+    const analyses: PairAnalysisResult[] = await Promise.all(
       PAIRS.map(async (pair) => {
         const [h4Res, d1Res] = await Promise.all([
           fetch(`${baseUrl}/v3/instruments/${pair}/candles?granularity=H4&count=100&price=M`, {
@@ -47,34 +33,31 @@ export async function POST() {
         ]);
 
         const [h4Data, d1Data] = await Promise.all([h4Res.json(), d1Res.json()]);
-
         const h4Candles = parseCandles(h4Data.candles || []);
         const d1Candles = parseCandles(d1Data.candles || []);
 
-        const h4Bias = getTrendBias(h4Candles);
-        const d1Bias = getD1Bias(d1Candles);
-        const ktResult = detectKangarooTail(h4Candles, h4Bias);
-        const bigShadow = detectBigShadow(h4Candles);
-        const insideBar = detectInsideBar(h4Candles);
-        const keyLevels = extractKeyLevels(h4Candles);
-
-        return {
-          pair,
-          d1_bias: d1Bias,
-          h4_candles: h4Candles.slice(-20),
-          patterns: { kt: ktResult.isValidSetup, big_shadow: bigShadow, inside_bar: insideBar, bias: h4Bias },
-          key_levels_raw: keyLevels,
-        };
+        return runFullPairAnalysis(pair, h4Candles, d1Candles);
       })
     );
 
-    const aiResult = await scanMarketsWithAI(pairData);
+    // Step 2: AI summaries only — no invented values
+    const aiResult = await summariseWithAI(analyses);
+
+    // Step 3: Merge AI summaries into analysis results
+    const summaryMap = Object.fromEntries(
+      aiResult.output.pairs.map((p) => [p.pair, p.aiSummary])
+    );
+
+    const mergedPairs = analyses.map((a) => ({
+      ...a,
+      aiSummary: summaryMap[a.pair] ?? "",
+    }));
 
     return NextResponse.json({
       ok: true,
       scanned_at: new Date().toISOString(),
-      summary: aiResult.output.summary,
-      pairs: aiResult.output.pairs,
+      overallSummary: aiResult.output.overallSummary,
+      pairs: mergedPairs,
       meta: {
         model: aiResult.model,
         cost_usd: aiResult.cost_usd,

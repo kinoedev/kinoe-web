@@ -2,106 +2,60 @@ import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
 import { anthropicCostUsd } from "./pricing";
-import type { KeyLevel, ParsedCandle } from "@/lib/signals/detection";
+import type { PairAnalysisResult } from "@/lib/signals/detection";
 
-const KeyLevelSchema = z.object({
-  price: z.number(),
-  type: z.enum(["support", "resistance"]),
-  notes: z.string(),
+const ScanSummarySchema = z.object({
+  overallSummary: z.string(),
+  pairs: z.array(
+    z.object({
+      pair: z.string(),
+      aiSummary: z.string(),
+    })
+  ),
 });
 
-const SetupSchema = z.object({
-  name: z.string(),
-  direction: z.enum(["LONG", "SHORT"]),
-  entry: z.number(),
-  stop: z.number(),
-  target: z.number(),
-  rr: z.number(),
-  confidence: z.number().int().min(1).max(5),
-  notes: z.string(),
-});
+export type ScanSummaryOutput = z.infer<typeof ScanSummarySchema>;
 
-const PairScanSchema = z.object({
-  pair: z.string(),
-  bias: z.enum(["BULLISH", "BEARISH", "NEUTRAL", "WATCH"]),
-  trend_strength: z.enum(["STRONG", "MODERATE", "WEAK"]),
-  key_levels: z.array(KeyLevelSchema).max(4),
-  setup_found: z.boolean(),
-  setup: z.union([SetupSchema, z.null()]),
-  watch: z.string(),
-});
+const SYSTEM_PROMPT = `You are a professional naked forex trader reviewing pre-calculated market analysis. Your job is to write clear, concise summaries explaining what the rule engine found.
 
-export const ScanOutputSchema = z.object({
-  summary: z.string(),
-  pairs: z.array(PairScanSchema),
-});
+Rules:
+- Write 2-3 sentences per pair (aiSummary). Be specific: mention the setup type, bias direction, trade status, and key levels if relevant.
+- Write 2-3 sentences for overallSummary covering the broad market picture across all pairs.
+- DO NOT invent prices, scores, setups, or change any values — only reference data you were given.
+- If no setup is detected, explain what conditions are missing and what to watch for.
+- Tone: professional, direct, no hype.`;
 
-export type ScanOutput = z.infer<typeof ScanOutputSchema>;
-export type PairScan = z.infer<typeof PairScanSchema>;
-
-const SYSTEM_PROMPT = `You are a professional naked forex trader with deep experience in price action. You analyse markets with no indicators — only candle structure, key levels, and pattern recognition.
-
-Setups you identify:
-- Kangaroo Tail (KT): Rejection candle with wick >60% of range and body <30%. Strong reversal signal at key levels.
-- Big Shadow: Engulfing candle (high > prev high, low < prev low) with body >70% of range. Momentum signal.
-- Inside Bar (IB): Current candle fully inside prior candle. Compression before breakout.
-
-Key level rules:
-- Swing highs (local max) = resistance. Swing lows (local min) = support.
-- Round numbers matter on XAU (nearest 50/100) and FX (nearest 0.005/0.010).
-- Mark the 2-3 most relevant levels closest to current price.
-
-Trade plan format when a setup is present:
-- Entry: close of signal candle (or break of level for IB)
-- Stop: beyond the key level (above wick high for bearish, below wick low for bullish)
-- Target: next significant opposing level
-- RR: calculated from entry/stop/target
-- Confidence: 1-5 (5 = all stars aligned — trend, level, pattern, momentum)
-
-When there is no high-probability setup, set setup_found: false and setup: null. Explain in watch what would change your view.
-
-Bias rules: BULLISH/BEARISH = directional with setup or strong trend. WATCH = wait for confirmation. NEUTRAL = ranging/no clear edge.`;
-
-export type PairInput = {
-  pair: string;
-  d1_bias: string;
-  h4_candles: ParsedCandle[];
-  patterns: { kt: boolean; big_shadow: boolean; inside_bar: boolean; bias: string };
-  key_levels_raw: KeyLevel[];
-};
-
-function buildScanPrompt(pairs: PairInput[]): string {
-  const sections = pairs.map((p) => {
-    const last12 = p.h4_candles.slice(-12);
-    const candleTable = last12
-      .map((c) => `  ${c.time.slice(0, 16)} | O:${c.open} H:${c.high} L:${c.low} C:${c.close}`)
+function buildSummaryPrompt(analyses: PairAnalysisResult[]): string {
+  const sections = analyses.map((r) => {
+    const levels = r.keyLevels
+      .map((l) => `    ${l.type.toUpperCase()}: ${l.price} (str: ${l.strengthScore}, ${l.reason})`)
       .join("\n");
 
-    const patterns: string[] = [];
-    if (p.patterns.kt) patterns.push(`Kangaroo Tail (${p.patterns.bias === "BULL" ? "bullish" : "bearish"})`);
-    if (p.patterns.big_shadow) patterns.push(`Big Shadow`);
-    if (p.patterns.inside_bar) patterns.push(`Inside Bar`);
+    const plan = r.potentialTradePlan
+      ? `  Trade plan: ${r.potentialTradePlan.direction} — entry: ${r.potentialTradePlan.entryTrigger}, SL: ${r.potentialTradePlan.stopLoss}, TP: ${r.potentialTradePlan.takeProfit}, RR: ${r.potentialTradePlan.riskReward}:1
+  Invalidation: ${r.potentialTradePlan.invalidation}`
+      : "  No trade plan.";
 
-    const levels = p.key_levels_raw.map((l) => `  ${l.type.toUpperCase()}: ${l.price}`).join("\n");
-
-    return `### ${p.pair}
-D1 bias: ${p.d1_bias} | H4 bias: ${p.patterns.bias}
-Rule-based patterns on latest H4 candle: ${patterns.length ? patterns.join(", ") : "none"}
-Nearby key levels:
-${levels || "  none identified"}
-Last 12 H4 candles (UTC):
-${candleTable}`;
+    return `## ${r.pair}
+  Status: ${r.tradeStatus} | Confidence: ${r.confidenceScore}/100
+  HTF bias (D1): ${r.higherTimeframeBias} | Execution (H4): ${r.executionTimeframeBias}
+  Market state: ${r.marketState} | Setup detected: ${r.setupDetected ? r.setupType : "None"}
+${plan}
+  Blockers: ${r.blockers.length ? r.blockers.join("; ") : "None"}
+  Triggers: ${r.triggerConditions.join("; ")}
+  Key levels:
+${levels || "    None identified"}`;
   });
 
-  return `Analyse the following pairs using naked forex price action. UTC time now: ${new Date().toUTCString()}.
+  return `Pre-calculated analysis as of ${new Date().toUTCString()}:
 
 ${sections.join("\n\n")}
 
-Return your analysis. Use the exact pair names as shown (e.g. "EUR_USD") in the pairs array.`;
+Write aiSummary for each pair and an overallSummary.`;
 }
 
-export async function scanMarketsWithAI(pairs: PairInput[]): Promise<{
-  output: ScanOutput;
+export async function summariseWithAI(analyses: PairAnalysisResult[]): Promise<{
+  output: ScanSummaryOutput;
   model: string;
   cost_usd: number;
   input_tokens: number;
@@ -115,10 +69,10 @@ export async function scanMarketsWithAI(pairs: PairInput[]): Promise<{
 
   const response = await client.messages.parse({
     model,
-    max_tokens: 4096,
+    max_tokens: 2048,
     system: [{ type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
-    messages: [{ role: "user", content: buildScanPrompt(pairs) }],
-    output_config: { format: zodOutputFormat(ScanOutputSchema) },
+    messages: [{ role: "user", content: buildSummaryPrompt(analyses) }],
+    output_config: { format: zodOutputFormat(ScanSummarySchema) },
   });
 
   if (!response.parsed_output) throw new Error("AI returned no parsed output");
