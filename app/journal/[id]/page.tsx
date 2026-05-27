@@ -22,6 +22,16 @@ export default function JournalEntryPage({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
 
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analyzeError, setAnalyzeError] = useState<string | null>(null);
+  const [analyzeMeta, setAnalyzeMeta] = useState<{
+    provider: string;
+    model: string;
+    cost_usd: number;
+    strengths: string[];
+    weaknesses: string[];
+  } | null>(null);
+
   const [outcome, setOutcome] = useState<Outcome | "">("");
   const [exitPrice, setExitPrice] = useState("");
   const [rMultiple, setRMultiple] = useState("");
@@ -75,6 +85,28 @@ export default function JournalEntryPage({
       setSaveError(err instanceof Error ? err.message : "Failed to save");
     } finally {
       setSavingPatch(false);
+    }
+  }
+
+  async function runAnalysis() {
+    setAnalyzing(true);
+    setAnalyzeError(null);
+    try {
+      const res = await fetch(`/api/journal/${id}/analyze`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok || !data?.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+      setEntry(data.entry);
+      setAnalyzeMeta({
+        provider: data.provider,
+        model: data.model,
+        cost_usd: data.cost_usd,
+        strengths: data.grade.strengths,
+        weaknesses: data.grade.weaknesses,
+      });
+    } catch (err) {
+      setAnalyzeError(err instanceof Error ? err.message : "Analysis failed");
+    } finally {
+      setAnalyzing(false);
     }
   }
 
@@ -217,15 +249,83 @@ export default function JournalEntryPage({
                 </form>
 
                 <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-5">
-                  <div className="flex items-center justify-between">
-                    <div className="text-sm text-white/80">AI analysis</div>
-                    <div className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] text-white/40">
-                      Coming next
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <div className="text-sm text-white/80">AI analysis</div>
+                      <div className="mt-1 text-xs text-white/40">
+                        Grade this trade on process quality. Stored to ai_analyses for bot training.
+                      </div>
                     </div>
+                    <button
+                      onClick={runAnalysis}
+                      disabled={analyzing}
+                      className="rounded-xl border border-purple-500/30 bg-purple-500/10 px-3 py-1.5 text-xs text-purple-100 transition hover:bg-purple-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {analyzing ? "Grading..." : entry.ai_grade ? "Re-grade" : "Grade this trade"}
+                    </button>
                   </div>
-                  <div className="mt-2 text-xs text-white/40">
-                    Claude / OpenAI will grade the setup, critique the thesis, and label the trade for bot training. Wiring next phase.
-                  </div>
+
+                  {analyzeError ? (
+                    <div className="mt-3 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-200">
+                      {analyzeError}
+                    </div>
+                  ) : null}
+
+                  {entry.ai_grade ? (
+                    <div className="mt-5 space-y-4">
+                      <div className="flex items-center gap-4">
+                        <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-purple-500/30 bg-purple-500/10 text-3xl font-medium text-purple-100">
+                          {entry.ai_grade}
+                        </div>
+                        <div>
+                          <div className="text-xs text-white/50">Score</div>
+                          <div className="text-2xl font-medium text-white">{entry.ai_score}/100</div>
+                          {entry.ai_model ? (
+                            <div className="mt-0.5 text-[10px] text-white/40">
+                              {entry.ai_provider} · {entry.ai_model}
+                              {entry.ai_cost_usd !== null
+                                ? ` · $${Number(entry.ai_cost_usd).toFixed(4)}`
+                                : ""}
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+
+                      {analyzeMeta ? (
+                        <div className="grid gap-3 md:grid-cols-2">
+                          <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-3">
+                            <div className="text-xs text-emerald-200">Strengths</div>
+                            <ul className="mt-2 space-y-1.5 text-xs leading-5 text-white/70">
+                              {analyzeMeta.strengths.map((s, i) => (
+                                <li key={i}>• {s}</li>
+                              ))}
+                            </ul>
+                          </div>
+                          <div className="rounded-xl border border-red-500/20 bg-red-500/5 p-3">
+                            <div className="text-xs text-red-200">Weaknesses</div>
+                            <ul className="mt-2 space-y-1.5 text-xs leading-5 text-white/70">
+                              {analyzeMeta.weaknesses.map((s, i) => (
+                                <li key={i}>• {s}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        </div>
+                      ) : null}
+
+                      {entry.ai_review_md ? (
+                        <div className="rounded-xl border border-white/10 bg-black/30 p-4">
+                          <div className="text-xs text-white/50">Review</div>
+                          <div className="mt-2 whitespace-pre-wrap text-xs leading-5 text-white/70">
+                            {entry.ai_review_md}
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <div className="mt-4 text-xs text-white/40">
+                      No analysis yet. Click <span className="text-purple-200">Grade this trade</span> to run.
+                    </div>
+                  )}
                 </div>
               </>
             )}

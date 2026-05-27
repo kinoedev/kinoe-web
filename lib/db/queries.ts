@@ -64,3 +64,49 @@ export async function deleteJournalEntry(id: string): Promise<boolean> {
   const rows = await sql`DELETE FROM journal_entries WHERE id = ${id} RETURNING id`;
   return rows.length > 0;
 }
+
+export type GradeRecord = {
+  grade: string;
+  score: number;
+  review_md: string;
+  provider: string;
+  model: string;
+  cost_usd: number;
+  prompt_md: string;
+  response_json: unknown;
+  input_tokens: number;
+  output_tokens: number;
+};
+
+export async function recordJournalGrade(
+  entryId: string,
+  grade: GradeRecord
+): Promise<JournalEntry | null> {
+  const rows = await sql`
+    UPDATE journal_entries SET
+      ai_grade      = ${grade.grade},
+      ai_score      = ${grade.score},
+      ai_review_md  = ${grade.review_md},
+      ai_provider   = ${grade.provider},
+      ai_model      = ${grade.model},
+      ai_cost_usd   = ${grade.cost_usd},
+      updated_at    = now()
+    WHERE id = ${entryId}
+    RETURNING *
+  `;
+  if (rows.length === 0) return null;
+
+  await sql`
+    INSERT INTO ai_analyses (
+      entry_id, kind, provider, model,
+      prompt_md, response_md, response_json,
+      input_tokens, output_tokens, cost_usd
+    ) VALUES (
+      ${entryId}, 'journal_grade', ${grade.provider}, ${grade.model},
+      ${grade.prompt_md}, ${grade.review_md}, ${JSON.stringify(grade.response_json)},
+      ${grade.input_tokens}, ${grade.output_tokens}, ${grade.cost_usd}
+    )
+  `;
+
+  return rows[0] as JournalEntry;
+}
