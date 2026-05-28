@@ -18,7 +18,7 @@ type SignalResponse = {
   reason?: string;
 };
 
-type SignalPanelProps = Record<string, never>;
+type SignalPanelProps = { pair?: string };
 
 function FieldCard(props: { label: string; value: string; tag?: string }) {
   return (
@@ -43,25 +43,17 @@ function formatNumber(value: number | null | undefined) {
   return value.toString();
 }
 
-type LogResult = { logged: boolean; reason?: string; existing_id?: string; entry?: { id: string } };
-
-export default function SignalPanel(_props: SignalPanelProps) {
+export default function SignalPanel({ pair = "EUR_USD" }: SignalPanelProps) {
   const [signal, setSignal] = useState<SignalResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const [logging, setLogging] = useState(false);
-  const [logResult, setLogResult] = useState<LogResult | null>(null);
-  const [logError, setLogError] = useState<string | null>(null);
 
   async function loadSignal() {
     try {
       setLoading(true);
       setError(null);
-      setLogResult(null);
-      setLogError(null);
 
-      const res = await fetch("/api/agent/signal", {
+      const res = await fetch(`/api/agent/signal?pair=${pair.replace("/", "_")}`, {
         method: "GET",
         cache: "no-store",
         headers: { Accept: "application/json" },
@@ -81,22 +73,6 @@ export default function SignalPanel(_props: SignalPanelProps) {
     }
   }
 
-  async function logToJournal() {
-    setLogging(true);
-    setLogError(null);
-    setLogResult(null);
-    try {
-      const res = await fetch("/api/agent/signal/log", { method: "POST" });
-      const data = await res.json();
-      if (!res.ok || !data?.ok) throw new Error(data?.error || `HTTP ${res.status}`);
-      setLogResult(data as LogResult);
-    } catch (err) {
-      setLogError(err instanceof Error ? err.message : "Log failed");
-    } finally {
-      setLogging(false);
-    }
-  }
-
   useEffect(() => {
     loadSignal();
   }, []);
@@ -109,7 +85,7 @@ export default function SignalPanel(_props: SignalPanelProps) {
         <div>
           <div className="text-sm text-white/80">Signals</div>
           <div className="mt-1 text-xs text-white/40">
-            Live signal scan — EUR/USD H4
+            {pair.replace("_", "/")} · H4 rule engine
           </div>
         </div>
 
@@ -131,30 +107,8 @@ export default function SignalPanel(_props: SignalPanelProps) {
       </button>
 
       {signal?.isValidSetup ? (
-        <button
-          onClick={logToJournal}
-          disabled={logging}
-          className="mt-2 w-full rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {logging ? "Logging..." : "Log to journal"}
-        </button>
-      ) : null}
-
-      {logResult ? (
-        <div className={`mt-3 rounded-xl border p-3 text-xs ${logResult.logged ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200" : "border-white/10 bg-white/5 text-white/50"}`}>
-          {logResult.logged && logResult.entry ? (
-            <>Signal logged. <Link href={`/journal/${logResult.entry.id}`} className="underline text-emerald-300">View entry</Link></>
-          ) : logResult.existing_id ? (
-            <>Already logged this window. <Link href={`/journal/${logResult.existing_id}`} className="underline text-white/70">View entry</Link></>
-          ) : (
-            logResult.reason ?? "No valid setup to log."
-          )}
-        </div>
-      ) : null}
-
-      {logError ? (
-        <div className="mt-3 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-200">
-          {logError}
+        <div className="mt-2 rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-2.5 text-xs text-emerald-300/70 text-center">
+          Setup found → go to <Link href="/agent" className="underline text-emerald-300">Agent</Link> to approve &amp; execute
         </div>
       ) : null}
 

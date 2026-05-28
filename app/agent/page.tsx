@@ -432,7 +432,7 @@ export default function AgentPage() {
                   <label className="text-[10px] text-white/40 uppercase tracking-wider">Max Risk Per Trade (%)</label>
                   <div className="mt-1 flex items-center gap-3">
                     <input
-                      type="range" min={0.1} max={1.0} step={0.05}
+                      type="range" min={0.005} max={0.05} step={0.005}
                       value={d.max_risk_per_trade_pct ?? settings.max_risk_per_trade_pct}
                       onChange={(e) => setDraft((d) => ({ ...d, max_risk_per_trade_pct: Number(e.target.value) }))}
                       className="flex-1 accent-purple-500"

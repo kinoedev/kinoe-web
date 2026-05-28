@@ -126,7 +126,7 @@ const DEFAULT_SETTINGS: Omit<AgentSettings, "id" | "created_at" | "updated_at"> 
   max_trades_per_day: 3,
   min_confidence_score: 75,
   min_risk_reward: 3.0,
-  max_risk_per_trade_pct: 0.25,
+  max_risk_per_trade_pct: 0.01,
   allowed_pairs: ["EUR_USD", "GBP_USD", "XAU_USD"],
   allowed_timeframes: ["H4"],
   telegram_chat_id: null,
