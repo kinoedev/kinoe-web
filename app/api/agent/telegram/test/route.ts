@@ -21,7 +21,7 @@ export async function POST() {
   const result = await sendTelegramMessage(
     token,
     chatId,
-    "*KINOE Agent — Test Message*\n\nYour Telegram alerts are working correctly.\n\nThe bot will send you trade setups that look like this:\n\n*XAU/USD SHORT*\nScore: 82 · RR: 3.2:1\nStatus: TRADE_READY\nSetup: Bearish Kangaroo Tail\n\nEntry: `2,345.00`\nSL: `2,380.00`\nTP: `2,240.00`\n\nWith Approve / Deny / Journal buttons.",
+    `<b>KINOE Agent - Test Message</b>\n\nYour Telegram alerts are working.\n\nTrade alerts will look like:\n\n<b>XAU/USD SHORT</b>\nScore: 82 | RR: 3.2:1\nStatus: TRADE_READY\nSetup: Bearish Kangaroo Tail\n\nSL: <code>2380.00000</code>\nTP: <code>2240.00000</code>\n\nWith Approve / Deny / Journal buttons.`,
   );
 
   if (!result.ok) {

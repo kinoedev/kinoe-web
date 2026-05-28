@@ -122,8 +122,8 @@ export async function POST(req: NextRequest) {
         token,
         String(cq.message.chat.id),
         String(cq.message.message_id),
-        `*${candidate.pair.replace("_", "/")} ${candidate.direction ?? ""}*\n` +
-        `Score: ${candidate.confidence_score} · RR: ${candidate.risk_reward?.toFixed(1) ?? "?"}:1\n\n` +
+        `<b>${candidate.pair.replace("_", "/")} ${candidate.direction ?? ""}</b>\n` +
+        `Score: ${candidate.confidence_score} | RR: ${Number(candidate.risk_reward).toFixed(1)}:1\n\n` +
         `${label}${journalEntryId ? "\nJournal entry created." : ""}`
       );
     }

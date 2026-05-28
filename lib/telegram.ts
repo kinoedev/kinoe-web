@@ -15,7 +15,7 @@ export async function sendTelegramMessage(
   const body: Record<string, unknown> = {
     chat_id: chatId,
     text,
-    parse_mode: "Markdown",
+    parse_mode: "HTML",
   };
 
   if (inlineKeyboard) {
@@ -49,7 +49,7 @@ export async function editTelegramMessage(
       chat_id: chatId,
       message_id: Number(messageId),
       text,
-      parse_mode: "Markdown",
+      parse_mode: "HTML",
     }),
   });
 }
@@ -87,38 +87,36 @@ export function buildCandidateAlert(candidate: AgentCandidate): {
   const dir = candidate.direction ?? "?";
   const pair = candidate.pair.replace("_", "/");
   const score = candidate.confidence_score ?? "?";
-  const rr = candidate.risk_reward?.toFixed(1) ?? "?";
+  const rr = Number(candidate.risk_reward).toFixed(1) ?? "?";
   const setup = candidate.setup_type ?? "Unknown setup";
   const status = candidate.trade_status ?? "?";
-  const entry = candidate.entry_price?.toFixed(5) ?? "?";
-  const sl = candidate.stop_loss?.toFixed(5) ?? "?";
-  const tp = candidate.take_profit?.toFixed(5) ?? "?";
+  const sl = candidate.stop_loss ? Number(candidate.stop_loss).toFixed(5) : "?";
+  const tp = candidate.take_profit ? Number(candidate.take_profit).toFixed(5) : "?";
   const blockers = candidate.blockers?.length
     ? candidate.blockers.join(", ")
     : "None";
   const triggers = (candidate.trigger_conditions as string[] | undefined)?.length
-    ? (candidate.trigger_conditions as string[]).join("\n• ")
+    ? (candidate.trigger_conditions as string[]).join("\n- ")
     : "See analysis";
 
   const text =
-    `*KINOE Agent — Setup Found*\n\n` +
-    `*${pair} ${dir}*\n` +
-    `Score: ${score} · RR: ${rr}:1\n` +
+    `<b>KINOE Agent - Setup Found</b>\n\n` +
+    `<b>${pair} ${dir}</b>\n` +
+    `Score: ${score} | RR: ${rr}:1\n` +
     `Status: ${status}\n` +
     `Setup: ${setup}\n\n` +
-    `Entry: \`${entry}\`\n` +
-    `SL: \`${sl}\`\n` +
-    `TP: \`${tp}\`\n\n` +
-    `Trigger:\n• ${triggers}\n\n` +
+    `SL: <code>${sl}</code>\n` +
+    `TP: <code>${tp}</code>\n\n` +
+    `Trigger:\n- ${triggers}\n\n` +
     `Blockers: ${blockers}`;
 
   const keyboard = [
     [
-      { text: "✅ Approve", callback_data: `approve:${candidate.id}` },
-      { text: "❌ Deny",    callback_data: `deny:${candidate.id}` },
+      { text: "Approve", callback_data: `approve:${candidate.id}` },
+      { text: "Deny",    callback_data: `deny:${candidate.id}` },
     ],
     [
-      { text: "📓 Journal Only", callback_data: `journal:${candidate.id}` },
+      { text: "Journal Only", callback_data: `journal:${candidate.id}` },
     ],
   ];
 
