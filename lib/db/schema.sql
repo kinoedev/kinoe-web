@@ -90,3 +90,106 @@ CREATE TABLE IF NOT EXISTS ai_analyses (
 
 CREATE INDEX IF NOT EXISTS ai_analyses_entry_id_idx    ON ai_analyses(entry_id);
 CREATE INDEX IF NOT EXISTS ai_analyses_backtest_id_idx ON ai_analyses(backtest_id);
+
+-- ─── Agent system ─────────────────────────────────────────────────────────────
+
+-- Single-row settings table (upserted on save)
+CREATE TABLE IF NOT EXISTS agent_settings (
+  id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  agent_mode              TEXT NOT NULL DEFAULT 'OFF'
+                            CHECK (agent_mode IN ('OFF','ALERT_ONLY','APPROVAL_REQUIRED','DEMO_AUTO')),
+  kill_switch             BOOLEAN NOT NULL DEFAULT false,
+
+  max_trades_per_day      INT NOT NULL DEFAULT 3,
+  min_confidence_score    INT NOT NULL DEFAULT 75,
+  min_risk_reward         NUMERIC(4,1) NOT NULL DEFAULT 3.0,
+  max_risk_per_trade_pct  NUMERIC(4,2) NOT NULL DEFAULT 0.25,
+
+  allowed_pairs           TEXT[] NOT NULL DEFAULT '{EUR_USD,GBP_USD,XAU_USD}',
+  allowed_timeframes      TEXT[] NOT NULL DEFAULT '{H4}',
+
+  telegram_chat_id        TEXT
+);
+
+-- One row per scanner run (manual or scheduled)
+CREATE TABLE IF NOT EXISTS agent_runs (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  triggered_by    TEXT NOT NULL DEFAULT 'manual',
+  pairs_scanned   TEXT[] NOT NULL DEFAULT '{}',
+  candidates_found INT NOT NULL DEFAULT 0,
+  trades_taken    INT NOT NULL DEFAULT 0,
+  error           TEXT,
+  duration_ms     INT
+);
+
+CREATE INDEX IF NOT EXISTS agent_runs_created_at_idx ON agent_runs(created_at DESC);
+
+-- Every setup the agent considered during a run
+CREATE TABLE IF NOT EXISTS agent_candidates (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  run_id          UUID REFERENCES agent_runs(id) ON DELETE CASCADE,
+
+  pair            TEXT NOT NULL,
+  timeframe       TEXT NOT NULL,
+  direction       TEXT CHECK (direction IN ('LONG','SHORT')),
+  setup_type      TEXT,
+  confidence_score INT,
+  trade_status    TEXT,
+  risk_reward     NUMERIC(8,2),
+  entry_price     NUMERIC(18,8),
+  stop_loss       NUMERIC(18,8),
+  take_profit     NUMERIC(18,8),
+  blockers        TEXT[] NOT NULL DEFAULT '{}',
+  trigger_conditions TEXT[] NOT NULL DEFAULT '{}',
+
+  analysis_json   JSONB,
+
+  decision        TEXT NOT NULL DEFAULT 'PENDING'
+                    CHECK (decision IN ('PENDING','APPROVED','DENIED','JOURNAL_ONLY','AUTO_SKIPPED','EXPIRED')),
+  decided_at      TIMESTAMPTZ,
+  decision_reason TEXT,
+
+  telegram_message_id TEXT,
+  journal_entry_id    UUID REFERENCES journal_entries(id)
+);
+
+CREATE INDEX IF NOT EXISTS agent_candidates_run_id_idx     ON agent_candidates(run_id);
+CREATE INDEX IF NOT EXISTS agent_candidates_created_at_idx ON agent_candidates(created_at DESC);
+CREATE INDEX IF NOT EXISTS agent_candidates_decision_idx   ON agent_candidates(decision);
+
+-- Audit trail for every approve/deny decision
+CREATE TABLE IF NOT EXISTS agent_decisions (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  candidate_id    UUID REFERENCES agent_candidates(id) ON DELETE CASCADE,
+  decision        TEXT NOT NULL,
+  source          TEXT NOT NULL DEFAULT 'telegram',
+  notes           TEXT
+);
+
+CREATE INDEX IF NOT EXISTS agent_decisions_candidate_id_idx ON agent_decisions(candidate_id);
+
+-- Placeholder for future OANDA order tracking
+CREATE TABLE IF NOT EXISTS agent_orders (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  candidate_id    UUID REFERENCES agent_candidates(id),
+  oanda_order_id  TEXT,
+  oanda_trade_id  TEXT,
+  status          TEXT NOT NULL DEFAULT 'PENDING',
+  error           TEXT
+);
+
+-- Telegram chat subscriptions
+CREATE TABLE IF NOT EXISTS notification_subscriptions (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  type        TEXT NOT NULL DEFAULT 'telegram',
+  identifier  TEXT NOT NULL UNIQUE,
+  active      BOOLEAN NOT NULL DEFAULT true
+);

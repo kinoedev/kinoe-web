@@ -78,3 +78,60 @@ export type UpdateJournalEntry = Partial<{
   lesson_tags: string[];
   chart_urls: string[];
 }>;
+
+// ─── Agent types ──────────────────────────────────────────────────────────────
+
+export type AgentMode = "OFF" | "ALERT_ONLY" | "APPROVAL_REQUIRED" | "DEMO_AUTO";
+export type CandidateDecision = "PENDING" | "APPROVED" | "DENIED" | "JOURNAL_ONLY" | "AUTO_SKIPPED" | "EXPIRED";
+
+export type AgentSettings = {
+  id: string;
+  created_at: string;
+  updated_at: string;
+  agent_mode: AgentMode;
+  kill_switch: boolean;
+  max_trades_per_day: number;
+  min_confidence_score: number;
+  min_risk_reward: number;
+  max_risk_per_trade_pct: number;
+  allowed_pairs: string[];
+  allowed_timeframes: string[];
+  telegram_chat_id: string | null;
+};
+
+export type AgentRun = {
+  id: string;
+  created_at: string;
+  triggered_by: string;
+  pairs_scanned: string[];
+  candidates_found: number;
+  trades_taken: number;
+  error: string | null;
+  duration_ms: number | null;
+};
+
+export type AgentCandidate = {
+  id: string;
+  created_at: string;
+  run_id: string;
+  pair: string;
+  timeframe: string;
+  direction: Direction | null;
+  setup_type: string | null;
+  confidence_score: number | null;
+  trade_status: string | null;
+  risk_reward: number | null;
+  entry_price: number | null;
+  stop_loss: number | null;
+  take_profit: number | null;
+  blockers: string[];
+  trigger_conditions: string[];
+  analysis_json: unknown;
+  decision: CandidateDecision;
+  decided_at: string | null;
+  decision_reason: string | null;
+  telegram_message_id: string | null;
+  journal_entry_id: string | null;
+};
+
+export type NewAgentSettings = Partial<Omit<AgentSettings, "id" | "created_at" | "updated_at">>;

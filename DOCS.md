@@ -60,6 +60,8 @@ Set all of these in Vercel → Project → Settings → Environment Variables (a
 | `AI_MODEL_SCANNER` | ⬜ | Override the signal scanner model. Defaults to `claude-sonnet-4-6`. |
 | `AI_SKIP` | ⬜ | Set to `true` in `.env.local` only. Skips AI call during local testing — zero cost. Never set on Vercel. |
 | `MIGRATE_TOKEN` | ⬜ | Secret token to protect the `/api/db/migrate` endpoint. Only needed if you run migrations via HTTP instead of CLI. |
+| `TELEGRAM_BOT_TOKEN` | ⬜ | Bot token from @BotFather on Telegram. Required for agent alerts and approve/deny buttons. |
+| `TELEGRAM_CHAT_ID` | ⬜ | Your personal Telegram chat ID (fallback if not set in Agent settings page). Get it from @userinfobot. |
 
 ### Generating secrets locally
 
@@ -274,6 +276,103 @@ The status dot in the sidebar polls `/api/agent/status` every 60 seconds. If OAN
 | GET | `/api/oanda/account` | Full OANDA account summary |
 | GET | `/api/settings/env` | Returns `{KEY: true/false}` — never exposes values |
 | GET | `/api/settings/stats` | Journal win/loss stats + AI spend totals |
+| GET | `/api/agent/settings` | Load agent settings (creates defaults on first call) |
+| PATCH | `/api/agent/settings` | Update agent settings |
+| POST | `/api/agent/run` | Run the scanner, save candidates, send Telegram alerts |
+| GET | `/api/agent/runs` | List recent agent runs |
+| GET | `/api/agent/candidates` | List recent signal candidates |
+| POST | `/api/agent/telegram/test` | Send test message to Telegram |
+| POST | `/api/agent/telegram/setup` | Register Telegram webhook URL |
+| POST | `/api/agent/telegram/webhook` | Receive Telegram button taps (approve/deny) |
+
+---
+
+## Agent system (Phase 1)
+
+The agent is a controlled scanner that finds setups, notifies you on Telegram, and waits for your decision. No trades are executed automatically in Phase 1.
+
+### Modes
+
+| Mode | Behaviour |
+|---|---|
+| `OFF` | Agent disabled. No scans. |
+| `ALERT_ONLY` | Scans and sends Telegram notifications. No approve/deny buttons. |
+| `APPROVAL_REQUIRED` | Sends alerts with Approve / Deny / Journal buttons. Approved trades auto-log to journal. |
+| `DEMO_AUTO` | Not yet active. Reserved for future demo auto-trading. |
+
+### Filters applied before alerting
+
+A candidate must pass all of the following to generate a Telegram alert:
+
+- `confidenceScore >= min_confidence_score` (default 75)
+- `tradeStatus` is `TRADE_READY` or `WATCHLIST` (not `NO_TRADE` or `AVOID`)
+- `riskReward >= min_risk_reward` (default 3.0)
+- Pair is in `allowed_pairs`
+- Daily approved trade count < `max_trades_per_day`
+
+### Telegram setup
+
+1. Create a bot with @BotFather → get `TELEGRAM_BOT_TOKEN`
+2. Message @userinfobot → get your `TELEGRAM_CHAT_ID`
+3. Add `TELEGRAM_BOT_TOKEN` to Vercel env vars
+4. Set your Chat ID in Agent settings and save
+5. Deploy, then click "Register Webhook" on the Agent page
+
+### Telegram alert format
+
+```
+KINOE Agent — Setup Found
+
+XAU/USD SHORT
+Score: 82 · RR: 3.2:1
+Status: TRADE_READY
+Setup: Bearish Kangaroo Tail
+
+Entry: 2,345.00
+SL: 2,380.00
+TP: 2,240.00
+
+Trigger:
+• H4 close below KT low
+
+Blockers: None
+```
+
+Buttons: `✅ Approve` | `❌ Deny` | `📓 Journal Only`
+
+Tapping Approve or Journal Only creates a journal entry automatically with `source = 'agent_signal'`.
+
+### New database tables
+
+| Table | Purpose |
+|---|---|
+| `agent_settings` | Single-row config: mode, filters, Telegram chat ID |
+| `agent_runs` | One row per scan — how many pairs, candidates, errors |
+| `agent_candidates` | Every setup the agent evaluated, with its decision |
+| `agent_decisions` | Audit trail for approve/deny actions |
+| `agent_orders` | Placeholder for future OANDA order tracking |
+| `notification_subscriptions` | Telegram chat IDs / web push endpoints |
+
+### Scheduled scanning
+
+To scan automatically (without clicking Run Now):
+
+**Option A — cron-job.org (free):**
+1. Go to cron-job.org and create a new job
+2. URL: `https://your-vercel-app.vercel.app/api/agent/run`
+3. Method: POST
+4. Add header: `x-triggered-by: cron`
+5. Schedule: every 4 hours during market hours
+
+**Option B — Vercel Cron (Pro plan):**
+Add to `vercel.json`:
+```json
+{
+  "crons": [
+    { "path": "/api/agent/run", "schedule": "0 */4 * * 1-5" }
+  ]
+}
+```
 
 ---
 
