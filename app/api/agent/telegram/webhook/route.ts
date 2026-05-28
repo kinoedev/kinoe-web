@@ -5,8 +5,12 @@ import {
   createJournalEntry,
   getAgentSettings,
   createAgentOrder,
+  closeAgentOrder,
 } from "@/lib/db/queries";
-import { answerCallbackQuery, editTelegramMessage } from "@/lib/telegram";
+import { answerCallbackQuery, editTelegramMessage, sendTelegramMessage } from "@/lib/telegram";
+import { placeStopOrder } from "@/lib/oanda/orders";
+import { getAccountBalance } from "@/lib/oanda/account";
+import { calculatePositionSize } from "@/lib/broker/sizing";
 import type { CandidateDecision } from "@/lib/db/types";
 
 type TelegramUpdate = {
@@ -20,53 +24,86 @@ type TelegramUpdate = {
   };
 };
 
-const DECISION_LABELS: Record<string, string> = {
-  approve:  "✅ Approved — logged to journal",
-  deny:     "❌ Denied",
-  journal:  "📓 Journalled (no trade)",
-};
-
 export async function POST(req: NextRequest) {
   try {
     const update = (await req.json()) as TelegramUpdate;
     const cq = update.callback_query;
 
-    if (!cq?.data) {
-      return NextResponse.json({ ok: true });
-    }
+    if (!cq?.data) return NextResponse.json({ ok: true });
 
     const token = process.env.TELEGRAM_BOT_TOKEN;
-
-    // Always answer the callback to remove the loading spinner in Telegram
-    if (token) {
-      await answerCallbackQuery(token, cq.id, "Processing...");
-    }
+    if (token) await answerCallbackQuery(token, cq.id, "Processing...");
 
     const [action, candidateId] = cq.data.split(":");
-    if (!action || !candidateId) {
-      return NextResponse.json({ ok: true });
-    }
+    if (!action || !candidateId) return NextResponse.json({ ok: true });
 
     const candidate = await getAgentCandidate(candidateId);
-    if (!candidate) {
-      return NextResponse.json({ ok: true });
-    }
+    if (!candidate) return NextResponse.json({ ok: true });
 
-    // Ignore duplicate taps (already decided)
     if (candidate.decision !== "PENDING") {
-      if (token && cq.message) {
-        await answerCallbackQuery(token, cq.id, `Already ${candidate.decision}`);
-      }
+      if (token) await answerCallbackQuery(token, cq.id, `Already ${candidate.decision}`);
       return NextResponse.json({ ok: true });
     }
 
     let decision: CandidateDecision = "DENIED";
     let journalEntryId: string | undefined;
+    let executionNote = "";
 
     if (action === "approve") {
       decision = "APPROVED";
 
       if (candidate.direction === "LONG" || candidate.direction === "SHORT") {
+        const settings = await getAgentSettings();
+        const apiKey = process.env.OANDA_API_KEY;
+        const accountId = process.env.OANDA_ACCOUNT_ID;
+        const baseUrl = (process.env.OANDA_ACCOUNT_TYPE ?? "practice") === "live"
+          ? "https://api-fxtrade.oanda.com"
+          : "https://api-fxpractice.oanda.com";
+
+        // Fetch live balance for accurate position sizing
+        const balance = apiKey && accountId
+          ? await getAccountBalance(accountId, apiKey, baseUrl)
+          : null;
+
+        // Calculate units
+        let units = 1000; // fallback minimum
+        if (balance && candidate.entry_price && candidate.stop_loss) {
+          const sizeResult = calculatePositionSize(
+            Number(candidate.entry_price),
+            Number(candidate.stop_loss),
+            balance,
+            Number(settings.max_risk_per_trade_pct) || 0.01,
+            candidate.pair
+          );
+          if (sizeResult.ok && sizeResult.units > 0) units = sizeResult.units;
+        }
+
+        // Place stop order on OANDA
+        let oandaOrderId: string | undefined;
+        let oandaTradeId: string | undefined;
+
+        if (apiKey && accountId && candidate.entry_price && candidate.stop_loss && candidate.take_profit) {
+          const orderResult = await placeStopOrder(accountId, apiKey, baseUrl, {
+            instrument: candidate.pair,
+            direction: candidate.direction,
+            units,
+            entryPrice: Number(candidate.entry_price),
+            stopLoss: Number(candidate.stop_loss),
+            takeProfit: Number(candidate.take_profit),
+          });
+
+          if (orderResult.ok) {
+            oandaOrderId = orderResult.orderId;
+            oandaTradeId = orderResult.tradeId;
+            executionNote = `✅ Order placed on OANDA\nUnits: ${units.toLocaleString()}${oandaOrderId ? ` · Order #${oandaOrderId}` : ""}`;
+          } else {
+            executionNote = `⚠️ OANDA order failed: ${orderResult.error}`;
+          }
+        } else {
+          executionNote = "⚠️ Skipped OANDA execution — missing price data or credentials";
+        }
+
+        // Create journal entry
         try {
           const entry = await createJournalEntry({
             pair: candidate.pair,
@@ -83,24 +120,32 @@ export async function POST(req: NextRequest) {
           });
           journalEntryId = entry.id;
 
-          // Create agent_order for OANDA close-check polling
-          const settings = await getAgentSettings();
-          const accountId = process.env.OANDA_ACCOUNT_ID ?? null;
-          await createAgentOrder({
+          // Create agent_order row linking to journal + OANDA IDs
+          const order = await createAgentOrder({
             candidate_id: candidate.id,
             journal_entry_id: entry.id,
             pair: candidate.pair,
             direction: candidate.direction,
-            oanda_account_id: accountId,
+            oanda_account_id: accountId ?? null,
             open_price: candidate.entry_price ?? null,
             stop_loss: candidate.stop_loss ?? null,
             take_profit: candidate.take_profit ?? null,
           });
-          void settings;
+
+          // If trade filled immediately (rare for stops), mark order closed
+          if (oandaTradeId && order) {
+            await closeAgentOrder(order.id, {
+              close_price: Number(candidate.entry_price),
+              realized_pnl: 0,
+              closed_at: new Date().toISOString(),
+              oanda_trade_id: oandaTradeId,
+            });
+          }
         } catch {
-          // Journal write failure shouldn't block the decision
+          // Journal failure doesn't block the decision
         }
       }
+
     } else if (action === "journal") {
       decision = "JOURNAL_ONLY";
       if (candidate.direction === "LONG" || candidate.direction === "SHORT") {
@@ -117,10 +162,14 @@ export async function POST(req: NextRequest) {
             thesis_md: buildThesisMd(candidate),
           });
           journalEntryId = entry.id;
+          executionNote = "📓 Logged to journal — no OANDA order placed";
         } catch {
-          // Journal write failure shouldn't block the decision
+          //
         }
       }
+    } else {
+      // deny
+      executionNote = "❌ Denied — no order placed";
     }
 
     await updateCandidateDecision(candidateId, decision, {
@@ -128,20 +177,32 @@ export async function POST(req: NextRequest) {
       journal_entry_id: journalEntryId,
     });
 
-    // Edit the original Telegram message to show the outcome
+    // Update the Telegram message with execution result
     if (token && cq.message) {
-      const label = DECISION_LABELS[action] ?? action;
+      const pair = candidate.pair.replace("_", "/");
+      const dir = candidate.direction ?? "";
+      const rr = candidate.risk_reward != null ? `${Number(candidate.risk_reward).toFixed(1)}:1` : "?";
       await editTelegramMessage(
         token,
         String(cq.message.chat.id),
         String(cq.message.message_id),
-        `<b>${candidate.pair.replace("_", "/")} ${candidate.direction ?? ""}</b>\n` +
-        `Score: ${candidate.confidence_score} | RR: ${Number(candidate.risk_reward).toFixed(1)}:1\n\n` +
-        `${label}${journalEntryId ? "\nJournal entry created." : ""}`
+        `<b>${pair} ${dir}</b> · Score: ${candidate.confidence_score} · RR: ${rr}\n\n${executionNote}`
       );
     }
 
-    return NextResponse.json({ ok: true, decision, journalEntryId });
+    // If OANDA order failed, send a follow-up message so it's visible
+    if (action === "approve" && executionNote.startsWith("⚠️") && token) {
+      const chatId = cq.message?.chat.id
+        ? String(cq.message.chat.id)
+        : (await getAgentSettings()).telegram_chat_id;
+      if (chatId) {
+        await sendTelegramMessage(token, chatId,
+          `<b>⚠️ Execution issue on ${candidate.pair.replace("_", "/")}</b>\n${executionNote}\n\nCheck OANDA credentials or place manually.`
+        );
+      }
+    }
+
+    return NextResponse.json({ ok: true, decision, journalEntryId, executionNote });
   } catch (err) {
     console.error("Telegram webhook error:", err);
     return NextResponse.json({ ok: true }); // Always 200 to Telegram

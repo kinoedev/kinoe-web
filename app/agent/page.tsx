@@ -295,7 +295,7 @@ export default function AgentPage() {
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-lg font-semibold text-white">Agent Control Center</div>
-                <div className="text-xs text-white/40 mt-0.5">Phase 1 — Alert &amp; Approval mode. No live trades yet.</div>
+                <div className="text-xs text-white/40 mt-0.5">Approve in Telegram → order placed on OANDA automatically.</div>
               </div>
               <div className="flex gap-2">
                 <button
