@@ -8,10 +8,13 @@ A private trading platform for naked forex/CFD price action. Tracks signals, jou
 
 | Section | What it is |
 |---|---|
-| **Terminal** | Home dashboard — TradingView chart + live signal scan result |
+| **Terminal** | Home dashboard — TradingView chart + live single-pair signal scan (rule engine, no AI cost) |
 | **Charts** | Full-screen TradingView Advanced Chart with 6-pair quick switcher and drawing tools |
-| **Signals** | Rule-based market scanner (EUR/USD, GBP/USD, XAU/USD on H4). Detects Kangaroo Tail, Big Shadow, Inside Bar. Scores confidence, calculates trade plans. Claude summarises findings — never invents values. |
+| **Signals** | Rule-based market scanner (H4). Detects Kangaroo Tail, Big Shadow, Inside Bar. Scores confidence, calculates trade plans. Claude summarises findings — never invents values. |
 | **Journal** | Manual and agent-logged trade entries. AI grades each entry on process, risk, and thesis quality. |
+| **Agent** | Autonomous scanner — scans all configured pairs, sends Telegram alerts with Approve/Deny/Journal buttons. Approve places a live GTC STOP order on OANDA. |
+| **Analytics** | Win rate, profit factor, equity curve, breakdown by pair/setup/source (agent vs kierra). |
+| **Market** | Session timeline, live prices, Forex Factory calendar, TradingView news widget. |
 | **Settings** | OANDA account status, AI spend, journal stats, env var health check. |
 
 ---
@@ -273,6 +276,10 @@ Two environment variables control which API is used:
 |---|---|
 | Account balance / NAV | `GET /v3/accounts/{id}/summary` |
 | Candle data | `GET /v3/instruments/{pair}/candles?granularity=H4&count=100&price=M` |
+| Place stop order | `POST /v3/accounts/{id}/orders` — type `STOP`, `GTC`, signed units |
+| Cancel order | `PUT /v3/accounts/{id}/orders/{id}/cancel` |
+| Open trades | `GET /v3/accounts/{id}/trades?state=OPEN` |
+| Closed trades | `GET /v3/accounts/{id}/trades?state=CLOSED` — used by close-check |
 
 The status dot in the sidebar polls `/api/agent/status` every 60 seconds. If OANDA returns a valid account summary, the dot goes green and shows the balance.
 
@@ -285,7 +292,9 @@ The status dot in the sidebar polls `/api/agent/status` every 60 seconds. If OAN
 | POST | `/api/auth/login` | Validates password, sets auth cookie |
 | POST | `/api/auth/logout` | Clears auth cookie |
 | GET | `/api/agent/status` | OANDA account ping — returns balance + connectivity |
-| POST | `/api/signals/scan` | Full 3-pair scan: rule engine → AI summaries |
+| GET | `/api/agent/signal` | Single-pair rule engine scan (Terminal panel). Accepts `?pair=EUR_USD`. No AI, no DB write. |
+| POST | `/api/signals/scan` | Multi-pair scan: rule engine → AI summaries (Signals page) |
+| GET | `/api/analytics/performance` | Win rate, R totals, equity curve, breakdown by pair/setup/source |
 | GET | `/api/journal` | List all journal entries |
 | POST | `/api/journal` | Create a new journal entry |
 | GET | `/api/journal/[id]` | Get single entry |
@@ -297,13 +306,14 @@ The status dot in the sidebar polls `/api/agent/status` every 60 seconds. If OAN
 | GET | `/api/settings/stats` | Journal win/loss stats + AI spend totals |
 | GET | `/api/agent/settings` | Load agent settings (creates defaults on first call) |
 | PATCH | `/api/agent/settings` | Update agent settings |
-| POST | `/api/agent/run` | Run the scanner, save candidates, send Telegram alerts |
+| POST | `/api/agent/run` | Run the scanner, save candidates, send Telegram alerts. Checks session gate for scheduled runs. |
 | GET | `/api/agent/runs` | List recent agent runs |
 | GET | `/api/agent/candidates` | List recent signal candidates |
 | POST | `/api/agent/telegram/test` | Send test message to Telegram |
 | POST | `/api/agent/telegram/setup` | Register Telegram webhook URL |
-| POST | `/api/agent/telegram/webhook` | Receive Telegram button taps (approve/deny) |
+| POST | `/api/agent/telegram/webhook` | Receive Telegram button taps — Approve places OANDA stop order |
 | POST | `/api/agent/close-check` | Poll OANDA for closed trades, auto-close matching journal entries, send Telegram review prompt |
+| GET | `/api/market/prices` | Live OANDA mid prices for market page |
 
 ---
 
@@ -317,8 +327,8 @@ The agent is a controlled scanner that finds setups, notifies you on Telegram, a
 |---|---|
 | `OFF` | Agent disabled. No scans. |
 | `ALERT_ONLY` | Scans and sends Telegram notifications. No approve/deny buttons. |
-| `APPROVAL_REQUIRED` | Sends alerts with Approve / Deny / Journal buttons. Approved trades auto-log to journal. |
-| `DEMO_AUTO` | Not yet active. Reserved for future demo auto-trading. |
+| `APPROVAL_REQUIRED` | Sends alerts with Approve / Deny / Journal buttons. Approve places a GTC STOP order on OANDA and logs to journal. |
+| `DEMO_AUTO` | Not yet active. Reserved for future auto-trading without approval step. |
 
 ### Risk engine (`lib/risk/engine.ts`)
 
@@ -337,6 +347,10 @@ Risk settings are stored in `agent_settings` and configurable from the Agent pag
 | `cooldown_hours` | 24 | Hours to pause after cooldown triggers |
 | `volatility_gate_enabled` | false | Enable/disable per-pair volatility check |
 | `max_adr_multiplier` | 2.5 | Skip pair if today's range > this × 14-day ADR |
+| `news_blackout_enabled` | false | Skip pairs when a high-impact Forex Factory event is imminent |
+| `news_blackout_minutes` | 60 | Minutes before/after event to block. Fetches FF XML feed per scan. |
+| `scan_sessions` | `[london, new_york]` | Which H4 sessions to scan when triggered by cron. Manual runs bypass this. |
+| `max_risk_per_trade_pct` | 0.01 | Risk per trade as a decimal (0.01 = 1%). Used for position sizing on approval. |
 
 ### Scanner service (`lib/agent/scanner.ts`)
 
@@ -391,7 +405,17 @@ Blockers: None
 
 Buttons: `✅ Approve` | `❌ Deny` | `📓 Journal Only`
 
-Tapping Approve creates a journal entry with `source = 'agent'` and starts OANDA close tracking. Journal Only also creates an entry but skips the trade plan. Manual entries on the journal page use `source = 'kierra'`.
+Tapping **Approve**:
+1. Fetches live OANDA account balance
+2. Calculates position size: `units = floor((balance × 1%) / |entry - SL|)`
+3. Places a GTC STOP order on OANDA (fills when price hits entry level)
+4. Creates a `journal_entry` with `source = 'agent'`
+5. Creates an `agent_order` row linking the candidate, journal entry, and OANDA order ID
+6. Edits the Telegram message to show order ID and units placed (or error detail)
+
+Tapping **Journal Only** creates the journal entry but skips OANDA execution.
+Tapping **Deny** records the decision only — no journal entry, no order.
+Manual entries on the journal page use `source = 'kierra'`.
 
 ### New database tables
 
@@ -431,26 +455,33 @@ Or call it alongside `/api/agent/run` — it's a quick poll with no AI cost.
 
 ---
 
+### Scan sessions
+
+The agent checks which trading session a scheduled run falls in and skips if no enabled session matches the current UTC hour. H4 candles close every 4 hours — scanning more often than that is pointless.
+
+| Session | H4 close hours (UTC) |
+|---|---|
+| Asian | 00:00, 04:00 |
+| London | 08:00, 12:00 |
+| New York | 12:00, 16:00, 20:00 |
+
+Defaults to London + New York. Configurable on the Agent page. Manual "Run Scan Now" always runs regardless of session filter.
+
 ### Scheduled scanning
 
-To scan automatically (without clicking Run Now):
+Two cron jobs on cron-job.org (free):
 
-**Option A — cron-job.org (free):**
-1. Go to cron-job.org and create a new job
-2. URL: `https://your-vercel-app.vercel.app/api/agent/run`
-3. Method: POST
-4. Add header: `x-triggered-by: cron`
-5. Schedule: every 4 hours during market hours
+**Job 1 — Agent Scanner**
+- URL: `https://kinoe.dev/api/agent/run`
+- Method: `POST`
+- Schedule: `0 0,4,8,12,16,20 * * *` (every H4 close)
 
-**Option B — Vercel Cron (Pro plan):**
-Add to `vercel.json`:
-```json
-{
-  "crons": [
-    { "path": "/api/agent/run", "schedule": "0 */4 * * 1-5" }
-  ]
-}
-```
+**Job 2 — Trade Close Check**
+- URL: `https://kinoe.dev/api/agent/close-check`
+- Method: `POST`
+- Schedule: every 15 minutes
+
+The session filter in the agent run route handles skipping runs outside enabled sessions — no need to restrict the cron schedule itself.
 
 ---
 
@@ -460,19 +491,23 @@ Add to `vercel.json`:
 kinoe-web/
 ├── app/
 │   ├── api/
-│   │   ├── agent/run/            # POST — run scanner + risk checks + Telegram alerts
+│   │   ├── agent/run/            # POST — scanner + risk checks + session gate + Telegram alerts
+│   │   ├── agent/signal/         # GET — single-pair rule scan for Terminal panel
 │   │   ├── agent/settings/       # GET/PATCH agent settings
 │   │   ├── agent/runs/           # GET recent runs
 │   │   ├── agent/candidates/     # GET recent candidates
+│   │   ├── agent/close-check/    # POST — poll OANDA for closed trades, auto-close journal entries
 │   │   ├── agent/status/         # OANDA connectivity check
-│   │   ├── agent/telegram/       # test, setup, webhook routes
+│   │   ├── agent/telegram/       # test, setup, webhook (approve → OANDA order)
+│   │   ├── analytics/performance/ # GET — win rate, equity curve, R stats
 │   │   ├── auth/                 # Login / logout
 │   │   ├── journal/              # CRUD + AI grader
 │   │   ├── market/prices/        # Live OANDA prices for market page
 │   │   ├── oanda/account/        # Account summary
 │   │   ├── settings/             # Env health + spend stats
 │   │   └── signals/scan/         # Full market scan (signals page)
-│   ├── agent/page.tsx            # Agent Control Center
+│   ├── agent/page.tsx            # Agent Control Center — settings, runs, candidates
+│   ├── analytics/page.tsx        # Performance analytics — equity curve, win rate, breakdowns
 │   ├── charts/page.tsx           # Full-screen TradingView chart
 │   ├── journal/                  # List, new entry, single entry pages
 │   ├── login/page.tsx            # Password login
@@ -492,9 +527,15 @@ kinoe-web/
 │
 ├── lib/
 │   ├── agent/
-│   │   └── scanner.ts            # Fetch candles, run analysis, volatility gate per pair
+│   │   └── scanner.ts            # Fetch candles, run analysis, volatility gate, session filter
+│   ├── broker/
+│   │   └── sizing.ts             # Position sizing: units = (balance × riskPct) / |entry - SL|
 │   ├── oanda/
-│   │   └── account.ts            # Fetch open/closed OANDA trades for close-check matching
+│   │   ├── account.ts            # Fetch open/closed OANDA trades, account balance/NAV
+│   │   └── orders.ts             # placeStopOrder, cancelOrder — GTC STOP entry orders
+│   ├── risk/
+│   │   ├── engine.ts             # Global + per-pair risk checks (cooldown, volatility gate)
+│   │   └── news.ts               # News blackout — Forex Factory XML feed parser
 │   ├── ai/
 │   │   ├── anthropic.ts          # Anthropic client wrapper
 │   │   ├── grader.ts             # Journal grading logic (Anthropic or OpenAI)
@@ -517,6 +558,7 @@ kinoe-web/
 │   │   ├── confidence.ts         # Weighted scoring, ConfidenceBreakdown, blockers
 │   │   ├── detection.ts          # Orchestrator — exports runFullPairAnalysis
 │   │   ├── levels.ts             # Key levels, market state, ADR calculation
+│   │   ├── m15.ts                # M15 precision entry drill-down (runs on TRADE_READY pairs)
 │   │   ├── patterns.ts           # KT, Big Shadow, Inside Bar detectors
 │   │   └── planner.ts            # TradePlan builder
 │   └── auth.ts                   # HMAC cookie sign/verify
