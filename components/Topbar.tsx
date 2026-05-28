@@ -71,7 +71,7 @@ export default function Topbar() {
     <header className="flex items-center justify-between border-b border-white/10 bg-black/30 px-6 py-4 backdrop-blur-xl">
       <div>
         <div className="text-sm font-medium text-white/90">{meta.title}</div>
-        {meta.sub && <div className="text-xs text-white/40">{meta.sub}</div>}
+        {meta.sub && <div className="hidden sm:block text-xs text-white/40">{meta.sub}</div>}
       </div>
 
       {/* Market Pulse button */}

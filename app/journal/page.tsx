@@ -64,7 +64,7 @@ export default function JournalPage() {
         <main className="flex-1">
           <Topbar />
 
-          <div className="p-6">
+          <div className="p-4 pb-24 md:p-6 md:pb-8">
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-sm text-white/80">Journal</div>

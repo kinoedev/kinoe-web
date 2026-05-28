@@ -74,7 +74,7 @@ export default function Sidebar(_props: SidebarProps = {}) {
   ];
 
   return (
-    <aside className="w-72 shrink-0 border-r border-white/10 bg-black/20 backdrop-blur-xl">
+    <aside className="hidden md:flex flex-col w-72 shrink-0 border-r border-white/10 bg-black/20 backdrop-blur-xl">
       <div className="px-6 py-6">
         <div className="text-xs tracking-[0.5em] text-white/80">K I N O E</div>
         <div className="mt-1 text-xs text-white/40">Trade with Intention</div>

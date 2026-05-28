@@ -17,7 +17,7 @@ export default function TerminalPage() {
         <Sidebar />
         <main className="flex-1">
           <Topbar />
-          <div className="grid gap-6 p-6 lg:grid-cols-3">
+          <div className="grid gap-4 p-4 pb-24 md:p-6 md:pb-8 lg:grid-cols-3">
             <div className="lg:col-span-2">
               <ChartPanel />
             </div>

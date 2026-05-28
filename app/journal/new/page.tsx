@@ -89,7 +89,7 @@ export default function NewJournalEntryPage() {
         <main className="flex-1">
           <Topbar />
 
-          <form onSubmit={onSubmit} className="p-6">
+          <form onSubmit={onSubmit} className="p-4 pb-24 md:p-6 md:pb-8">
             <div className="text-sm text-white/80">New entry</div>
             <div className="mt-1 text-xs text-white/40">
               Log a trade. Required: pair, timeframe, direction. Everything else can be filled in later.

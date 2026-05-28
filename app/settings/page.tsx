@@ -135,7 +135,7 @@ export default function SettingsPage() {
         <main className="flex-1">
           <Topbar />
 
-          <div className="p-6 space-y-5 max-w-4xl">
+          <div className="p-4 pb-24 space-y-5 max-w-4xl md:p-6 md:pb-8">
             <div>
               <div className="text-sm text-white/80">Settings</div>
               <div className="mt-1 text-xs text-white/40">Platform configuration, connections, and usage stats.</div>

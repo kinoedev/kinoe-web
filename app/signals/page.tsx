@@ -278,7 +278,7 @@ export default function SignalsPage() {
         <main className="flex-1">
           <Topbar />
 
-          <div className="p-6">
+          <div className="p-4 pb-24 md:p-6 md:pb-8">
             {/* Header */}
             <div className="flex items-start justify-between gap-6">
               <div>

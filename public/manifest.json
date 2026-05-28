@@ -1,0 +1,15 @@
+{
+  "name": "KINOE — Trade With Intention",
+  "short_name": "KINOE",
+  "description": "Private trading platform. Signals, journal, and agent scanner.",
+  "start_url": "/terminal",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0a0a0f",
+  "theme_color": "#7c3aed",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ],
+  "screenshots": [],
+  "categories": ["finance", "productivity"]
+}
