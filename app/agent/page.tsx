@@ -58,8 +58,76 @@ function decisionBadge(d: string) {
   return <Badge text={d} color="gray" />;
 }
 
-const PAIRS_ALL = ["EUR_USD", "GBP_USD", "XAU_USD"];
 const MODES = ["OFF", "ALERT_ONLY", "APPROVAL_REQUIRED", "DEMO_AUTO"] as const;
+
+type SessionKey = "asian" | "london" | "newyork";
+
+const SESSIONS: Record<SessionKey, { label: string; hours: string; utcStart: number; utcEnd: number; color: string }> = {
+  asian:   { label: "Tokyo",    hours: "00:00–09:00 UTC", utcStart: 0,  utcEnd: 9,  color: "text-blue-400 border-blue-500/30 bg-blue-500/10" },
+  london:  { label: "London",   hours: "08:00–17:00 UTC", utcStart: 8,  utcEnd: 17, color: "text-emerald-400 border-emerald-500/30 bg-emerald-500/10" },
+  newyork: { label: "New York", hours: "13:00–22:00 UTC", utcStart: 13, utcEnd: 22, color: "text-yellow-400 border-yellow-500/30 bg-yellow-500/10" },
+};
+
+type PairMeta = { id: string; sessions: SessionKey[] };
+
+const PAIR_CATEGORIES: { label: string; pairs: PairMeta[] }[] = [
+  {
+    label: "Majors",
+    pairs: [
+      { id: "EUR_USD", sessions: ["london", "newyork"] },
+      { id: "GBP_USD", sessions: ["london", "newyork"] },
+      { id: "USD_JPY", sessions: ["asian", "newyork"] },
+      { id: "USD_CHF", sessions: ["london", "newyork"] },
+      { id: "USD_CAD", sessions: ["newyork"] },
+      { id: "AUD_USD", sessions: ["asian", "london"] },
+      { id: "NZD_USD", sessions: ["asian"] },
+    ],
+  },
+  {
+    label: "High Volatility",
+    pairs: [
+      { id: "GBP_JPY", sessions: ["asian", "london", "newyork"] },
+      { id: "EUR_JPY", sessions: ["asian", "london"] },
+      { id: "GBP_AUD", sessions: ["asian", "london"] },
+      { id: "AUD_JPY", sessions: ["asian"] },
+      { id: "EUR_GBP", sessions: ["london"] },
+      { id: "GBP_CHF", sessions: ["london"] },
+      { id: "EUR_AUD", sessions: ["asian", "london"] },
+      { id: "EUR_NZD", sessions: ["asian", "london"] },
+      { id: "GBP_NZD", sessions: ["london"] },
+    ],
+  },
+  {
+    label: "Commodities",
+    pairs: [
+      { id: "XAU_USD", sessions: ["london", "newyork"] },
+      { id: "XAG_USD", sessions: ["london", "newyork"] },
+    ],
+  },
+  {
+    label: "Indices",
+    pairs: [
+      { id: "SPX500_USD", sessions: ["newyork"] },
+      { id: "NAS100_USD", sessions: ["newyork"] },
+      { id: "US30_USD",   sessions: ["newyork"] },
+      { id: "UK100_GBP",  sessions: ["london"] },
+      { id: "DE30_EUR",   sessions: ["london"] },
+    ],
+  },
+];
+
+const ALL_PAIRS = PAIR_CATEGORIES.flatMap((c) => c.pairs.map((p) => p.id));
+
+function getActiveSessions(): SessionKey[] {
+  const utcHour = new Date().getUTCHours();
+  return (Object.entries(SESSIONS) as [SessionKey, typeof SESSIONS[SessionKey]][])
+    .filter(([, s]) => utcHour >= s.utcStart && utcHour < s.utcEnd)
+    .map(([key]) => key);
+}
+
+function getPairsForSession(session: SessionKey): string[] {
+  return PAIR_CATEGORIES.flatMap((c) => c.pairs.filter((p) => p.sessions.includes(session)).map((p) => p.id));
+}
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
@@ -161,13 +229,28 @@ export default function AgentPage() {
     }
   }
 
+  const [activeSessions] = useState<SessionKey[]>(() => getActiveSessions());
+
   function togglePair(pair: string) {
-    const current = (draft.allowed_pairs ?? settings?.allowed_pairs ?? PAIRS_ALL);
+    const current = draft.allowed_pairs ?? settings?.allowed_pairs ?? [];
     const next = current.includes(pair)
       ? current.filter((p) => p !== pair)
       : [...current, pair];
     setDraft((d) => ({ ...d, allowed_pairs: next }));
   }
+
+  function selectSession(session: SessionKey) {
+    const sessionPairs = getPairsForSession(session);
+    const current = draft.allowed_pairs ?? settings?.allowed_pairs ?? [];
+    const allOn = sessionPairs.every((p) => current.includes(p));
+    const next = allOn
+      ? current.filter((p) => !sessionPairs.includes(p))
+      : [...new Set([...current, ...sessionPairs])];
+    setDraft((d) => ({ ...d, allowed_pairs: next }));
+  }
+
+  function selectAll() { setDraft((d) => ({ ...d, allowed_pairs: ALL_PAIRS })); }
+  function clearAll()  { setDraft((d) => ({ ...d, allowed_pairs: [] })); }
 
   if (!settings) {
     return (
@@ -361,27 +444,88 @@ export default function AgentPage() {
 
               </div>
 
-              {/* Pair toggles */}
-              <div className="mt-4">
-                <label className="text-[10px] text-white/40 uppercase tracking-wider">Allowed Pairs</label>
-                <div className="mt-2 flex gap-2">
-                  {PAIRS_ALL.map((pair) => {
-                    const on = (d.allowed_pairs ?? settings.allowed_pairs).includes(pair);
+              {/* Pair picker */}
+              <div className="mt-6">
+                <div className="flex items-center justify-between mb-3">
+                  <label className="text-[10px] text-white/40 uppercase tracking-wider">Allowed Pairs</label>
+                  <div className="flex gap-1.5 text-[10px]">
+                    <button onClick={selectAll} className="text-white/40 hover:text-white/70 transition">All</button>
+                    <span className="text-white/20">·</span>
+                    <button onClick={clearAll} className="text-white/40 hover:text-white/70 transition">Clear</button>
+                  </div>
+                </div>
+
+                {/* Session quick-select + live indicator */}
+                <div className="mb-4 flex flex-wrap gap-2">
+                  {(Object.entries(SESSIONS) as [SessionKey, typeof SESSIONS[SessionKey]][]).map(([key, s]) => {
+                    const isLive = activeSessions.includes(key);
+                    const sessionPairs = getPairsForSession(key);
+                    const allOn = sessionPairs.every((p) => (d.allowed_pairs ?? settings.allowed_pairs).includes(p));
                     return (
                       <button
-                        key={pair}
-                        onClick={() => togglePair(pair)}
+                        key={key}
+                        onClick={() => selectSession(key)}
                         className={[
-                          "rounded-lg border px-3 py-1.5 text-xs transition",
-                          on
-                            ? "border-purple-500/50 bg-purple-500/10 text-purple-300"
-                            : "border-white/10 text-white/30 hover:text-white/50",
+                          "flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-[11px] transition",
+                          allOn ? s.color : "border-white/10 text-white/40 hover:text-white/60",
                         ].join(" ")}
                       >
-                        {pair.replace("_", "/")}
+                        {isLive && <span className="inline-block h-1.5 w-1.5 rounded-full bg-current animate-pulse" />}
+                        {s.label}
+                        <span className="text-white/30">{s.hours}</span>
                       </button>
                     );
                   })}
+                </div>
+
+                {/* Pairs by category */}
+                <div className="space-y-4">
+                  {PAIR_CATEGORIES.map((cat) => (
+                    <div key={cat.label}>
+                      <div className="text-[9px] uppercase tracking-widest text-white/20 mb-2">{cat.label}</div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {cat.pairs.map(({ id, sessions: pairSessions }) => {
+                          const on = (d.allowed_pairs ?? settings.allowed_pairs).includes(id);
+                          return (
+                            <button
+                              key={id}
+                              onClick={() => togglePair(id)}
+                              className={[
+                                "group flex flex-col items-start rounded-xl border px-2.5 py-1.5 text-[11px] transition",
+                                on
+                                  ? "border-purple-500/50 bg-purple-500/10 text-purple-200"
+                                  : "border-white/10 text-white/30 hover:border-white/20 hover:text-white/60",
+                              ].join(" ")}
+                            >
+                              <span className="font-medium">{id.replace("_", "/")}</span>
+                              <div className="mt-0.5 flex gap-1">
+                                {pairSessions.map((sk) => (
+                                  <span
+                                    key={sk}
+                                    className={[
+                                      "rounded px-1 text-[8px] border",
+                                      activeSessions.includes(sk)
+                                        ? SESSIONS[sk].color
+                                        : "border-white/5 text-white/20",
+                                    ].join(" ")}
+                                  >
+                                    {SESSIONS[sk].label.slice(0, 3).toUpperCase()}
+                                  </span>
+                                ))}
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="mt-3 text-[10px] text-white/25">
+                  {(d.allowed_pairs ?? settings.allowed_pairs).length} pair{(d.allowed_pairs ?? settings.allowed_pairs).length !== 1 ? "s" : ""} selected
+                  {activeSessions.length > 0
+                    ? ` · Active session: ${activeSessions.map((s) => SESSIONS[s].label).join(" + ")}`
+                    : " · No major session active"}
                 </div>
               </div>
             </Section>
@@ -519,7 +663,7 @@ export default function AgentPage() {
               <Row label="Max trades / day" value={<span className="font-mono">{d.max_trades_per_day ?? settings.max_trades_per_day}</span>} />
               <Row label="Allowed pairs" value={
                 <span className="font-mono text-white/60">
-                  {(d.allowed_pairs ?? settings.allowed_pairs).map((p) => p.replace("_", "/")).join(", ")}
+                  {(d.allowed_pairs ?? settings.allowed_pairs).length} pairs selected
                 </span>
               } />
               <Row label="Telegram chat ID" value={
