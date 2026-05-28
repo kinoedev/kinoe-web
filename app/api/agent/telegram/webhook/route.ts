@@ -4,6 +4,7 @@ import {
   updateCandidateDecision,
   createJournalEntry,
   getAgentSettings,
+  createAgentOrder,
 } from "@/lib/db/queries";
 import { answerCallbackQuery, editTelegramMessage } from "@/lib/telegram";
 import type { CandidateDecision } from "@/lib/db/types";
@@ -65,10 +66,6 @@ export async function POST(req: NextRequest) {
     if (action === "approve") {
       decision = "APPROVED";
 
-      // Auto-log approved trade to journal
-      const settings = await getAgentSettings();
-      void settings; // referenced for potential future use
-
       if (candidate.direction === "LONG" || candidate.direction === "SHORT") {
         try {
           const entry = await createJournalEntry({
@@ -76,14 +73,30 @@ export async function POST(req: NextRequest) {
             timeframe: candidate.timeframe,
             direction: candidate.direction,
             setup_type: candidate.setup_type ?? undefined,
+            entry_price: candidate.entry_price ?? undefined,
             stop_loss: candidate.stop_loss ?? undefined,
             take_profit: candidate.take_profit ?? undefined,
             risk_reward: candidate.risk_reward ?? undefined,
             entered_at: new Date().toISOString(),
-            source: "agent_signal",
+            source: "agent",
             thesis_md: buildThesisMd(candidate),
           });
           journalEntryId = entry.id;
+
+          // Create agent_order for OANDA close-check polling
+          const settings = await getAgentSettings();
+          const accountId = process.env.OANDA_ACCOUNT_ID ?? null;
+          await createAgentOrder({
+            candidate_id: candidate.id,
+            journal_entry_id: entry.id,
+            pair: candidate.pair,
+            direction: candidate.direction,
+            oanda_account_id: accountId,
+            open_price: candidate.entry_price ?? null,
+            stop_loss: candidate.stop_loss ?? null,
+            take_profit: candidate.take_profit ?? null,
+          });
+          void settings;
         } catch {
           // Journal write failure shouldn't block the decision
         }
@@ -100,7 +113,7 @@ export async function POST(req: NextRequest) {
             stop_loss: candidate.stop_loss ?? undefined,
             take_profit: candidate.take_profit ?? undefined,
             risk_reward: candidate.risk_reward ?? undefined,
-            source: "agent_signal",
+            source: "agent",
             thesis_md: buildThesisMd(candidate),
           });
           journalEntryId = entry.id;

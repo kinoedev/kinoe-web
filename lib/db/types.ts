@@ -97,6 +97,12 @@ export type AgentSettings = {
   allowed_pairs: string[];
   allowed_timeframes: string[];
   telegram_chat_id: string | null;
+  cooldown_after_losses: number;
+  cooldown_hours: number;
+  volatility_gate_enabled: boolean;
+  max_adr_multiplier: number;
+  news_blackout_enabled: boolean;
+  news_blackout_minutes: number;
 };
 
 export type AgentRun = {
@@ -135,3 +141,24 @@ export type AgentCandidate = {
 };
 
 export type NewAgentSettings = Partial<Omit<AgentSettings, "id" | "created_at" | "updated_at">>;
+
+export type AgentOrder = {
+  id: string;
+  created_at: string;
+  candidate_id: string | null;
+  journal_entry_id: string | null;
+  pair: string;
+  direction: Direction | null;
+  oanda_account_id: string | null;
+  oanda_order_id: string | null;
+  oanda_trade_id: string | null;
+  open_price: number | null;
+  stop_loss: number | null;
+  take_profit: number | null;
+  status: "OPEN" | "CLOSED" | "CANCELLED" | "ERROR";
+  error: string | null;
+  close_price: number | null;
+  realized_pnl: number | null;
+  closed_at: string | null;
+  close_checked_at: string | null;
+};

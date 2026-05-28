@@ -15,8 +15,8 @@ export async function GET() {
     const [journalRow] = await sql`
       SELECT
         COUNT(*)::int                                                   AS total_entries,
-        COUNT(*) FILTER (WHERE source = 'agent_signal')::int           AS agent_entries,
-        COUNT(*) FILTER (WHERE source = 'manual')::int                 AS manual_entries,
+        COUNT(*) FILTER (WHERE source = 'agent')::int                   AS agent_entries,
+        COUNT(*) FILTER (WHERE source = 'kierra')::int                 AS manual_entries,
         COUNT(*) FILTER (WHERE outcome = 'WIN')::int                   AS wins,
         COUNT(*) FILTER (WHERE outcome = 'LOSS')::int                  AS losses,
         COUNT(*) FILTER (WHERE outcome = 'BE')::int                    AS breakevens,

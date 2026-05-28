@@ -80,35 +80,67 @@ export async function registerWebhook(token: string, webhookUrl: string): Promis
   }
 }
 
-export function buildCandidateAlert(candidate: AgentCandidate): {
+export function buildCandidateAlert(candidate: AgentCandidate, positionSizeText?: string): {
   text: string;
   keyboard: { text: string; callback_data: string }[][];
 } {
   const dir = candidate.direction ?? "?";
   const pair = candidate.pair.replace("_", "/");
   const score = candidate.confidence_score ?? "?";
-  const rr = Number(candidate.risk_reward).toFixed(1) ?? "?";
+  const rr = candidate.risk_reward != null ? Number(candidate.risk_reward).toFixed(1) : "?";
   const setup = candidate.setup_type ?? "Unknown setup";
   const status = candidate.trade_status ?? "?";
   const sl = candidate.stop_loss ? Number(candidate.stop_loss).toFixed(5) : "?";
   const tp = candidate.take_profit ? Number(candidate.take_profit).toFixed(5) : "?";
-  const blockers = candidate.blockers?.length
-    ? candidate.blockers.join(", ")
-    : "None";
-  const triggers = (candidate.trigger_conditions as string[] | undefined)?.length
-    ? (candidate.trigger_conditions as string[]).join("\n- ")
-    : "See analysis";
 
-  const text =
-    `<b>KINOE Agent - Setup Found</b>\n\n` +
+  const blockers = candidate.blockers?.length
+    ? candidate.blockers.map((b) => `- ${b}`).join("\n")
+    : "None";
+
+  const triggers = (candidate.trigger_conditions as string[] | undefined)?.length
+    ? (candidate.trigger_conditions as string[]).map((t) => `- ${t}`).join("\n")
+    : "- See analysis";
+
+  // Pull confidence factors and structure note from analysis_json
+  const analysis = candidate.analysis_json as Record<string, unknown> | null;
+  const breakdown = analysis?.confidenceBreakdown as { factors?: string[] } | undefined;
+  const topFactors = breakdown?.factors?.slice(0, 4) ?? [];
+  const structureNote = (analysis?.structureAnalysis as { note?: string } | undefined)?.note ?? "";
+  const riskPips = (analysis?.potentialTradePlan as { riskPips?: number } | undefined)?.riskPips;
+  const m15Plan = analysis?.m15EntryPlan as { direction?: string; stopLoss?: number; takeProfit?: number; riskReward?: number; riskPips?: number } | null;
+  const m15SetupType = analysis?.m15SetupType as string | null;
+
+  const factorsLine = topFactors.length
+    ? topFactors.map((f) => `  ${f}`).join("\n")
+    : "  No breakdown available";
+
+  let text =
+    `<b>KINOE - Setup Found</b>\n\n` +
     `<b>${pair} ${dir}</b>\n` +
-    `Score: ${score} | RR: ${rr}:1\n` +
-    `Status: ${status}\n` +
-    `Setup: ${setup}\n\n` +
-    `SL: <code>${sl}</code>\n` +
-    `TP: <code>${tp}</code>\n\n` +
-    `Trigger:\n- ${triggers}\n\n` +
-    `Blockers: ${blockers}`;
+    `Score: <b>${score}</b> | RR: ${rr}:1${riskPips ? ` | Risk: ${riskPips} pips` : ""}\n` +
+    `Status: ${status} | Setup: ${setup}\n\n` +
+    `<b>SL:</b> <code>${sl}</code>\n` +
+    `<b>TP:</b> <code>${tp}</code>\n` +
+    (positionSizeText ? `<b>Size:</b> ${positionSizeText}\n` : "") +
+    `\n<b>Why this scored ${score}:</b>\n${factorsLine}\n\n` +
+    `<b>Trigger:</b>\n${triggers}`;
+
+  if (structureNote) {
+    text += `\n\n<b>Structure:</b> ${structureNote}`;
+  }
+
+  if (m15Plan && m15SetupType) {
+    const m15Sl = m15Plan.stopLoss ? Number(m15Plan.stopLoss).toFixed(5) : "?";
+    const m15Tp = m15Plan.takeProfit ? Number(m15Plan.takeProfit).toFixed(5) : "?";
+    const m15Rr = m15Plan.riskReward ?? "?";
+    const m15Pips = m15Plan.riskPips ? ` · ${m15Plan.riskPips} pips` : "";
+    text += `\n\n<b>📍 M15 Entry (${m15SetupType}):</b>\nSL: <code>${m15Sl}</code> · TP: <code>${m15Tp}</code> · RR ${m15Rr}:1${m15Pips}`;
+  }
+
+  const blockersText = candidate.blockers?.length ? blockers : null;
+  if (blockersText) {
+    text += `\n\n<b>Blockers:</b>\n${blockersText}`;
+  }
 
   const keyboard = [
     [

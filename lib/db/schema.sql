@@ -111,8 +111,23 @@ CREATE TABLE IF NOT EXISTS agent_settings (
   allowed_pairs           TEXT[] NOT NULL DEFAULT '{EUR_USD,GBP_USD,XAU_USD}',
   allowed_timeframes      TEXT[] NOT NULL DEFAULT '{H4}',
 
-  telegram_chat_id        TEXT
+  telegram_chat_id        TEXT,
+
+  cooldown_after_losses   INT NOT NULL DEFAULT 3,
+  cooldown_hours          INT NOT NULL DEFAULT 24,
+  volatility_gate_enabled BOOLEAN NOT NULL DEFAULT false,
+  max_adr_multiplier      NUMERIC(4,2) NOT NULL DEFAULT 2.5,
+  news_blackout_enabled   BOOLEAN NOT NULL DEFAULT false,
+  news_blackout_minutes   INT NOT NULL DEFAULT 60
 );
+
+-- Add risk columns to existing installs (idempotent)
+ALTER TABLE agent_settings ADD COLUMN IF NOT EXISTS cooldown_after_losses   INT NOT NULL DEFAULT 3;
+ALTER TABLE agent_settings ADD COLUMN IF NOT EXISTS cooldown_hours          INT NOT NULL DEFAULT 24;
+ALTER TABLE agent_settings ADD COLUMN IF NOT EXISTS volatility_gate_enabled BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE agent_settings ADD COLUMN IF NOT EXISTS max_adr_multiplier      NUMERIC(4,2) NOT NULL DEFAULT 2.5;
+ALTER TABLE agent_settings ADD COLUMN IF NOT EXISTS news_blackout_enabled   BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE agent_settings ADD COLUMN IF NOT EXISTS news_blackout_minutes   INT NOT NULL DEFAULT 60;
 
 -- One row per scanner run (manual or scheduled)
 CREATE TABLE IF NOT EXISTS agent_runs (
@@ -174,16 +189,48 @@ CREATE TABLE IF NOT EXISTS agent_decisions (
 
 CREATE INDEX IF NOT EXISTS agent_decisions_candidate_id_idx ON agent_decisions(candidate_id);
 
--- Placeholder for future OANDA order tracking
+-- OANDA order tracking — one row per approved candidate
 CREATE TABLE IF NOT EXISTS agent_orders (
-  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-  candidate_id    UUID REFERENCES agent_candidates(id),
-  oanda_order_id  TEXT,
-  oanda_trade_id  TEXT,
-  status          TEXT NOT NULL DEFAULT 'PENDING',
-  error           TEXT
+  id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  candidate_id     UUID REFERENCES agent_candidates(id),
+  journal_entry_id UUID REFERENCES journal_entries(id),
+
+  pair             TEXT NOT NULL,
+  direction        TEXT,
+  oanda_account_id TEXT,
+  oanda_order_id   TEXT,
+  oanda_trade_id   TEXT,
+
+  open_price       NUMERIC(18,8),
+  stop_loss        NUMERIC(18,8),
+  take_profit      NUMERIC(18,8),
+
+  status           TEXT NOT NULL DEFAULT 'OPEN'
+                     CHECK (status IN ('OPEN','CLOSED','CANCELLED','ERROR')),
+  error            TEXT,
+
+  close_price      NUMERIC(18,8),
+  realized_pnl     NUMERIC(18,4),
+  closed_at        TIMESTAMPTZ,
+  close_checked_at TIMESTAMPTZ
 );
+
+CREATE INDEX IF NOT EXISTS agent_orders_candidate_id_idx ON agent_orders(candidate_id);
+CREATE INDEX IF NOT EXISTS agent_orders_status_idx       ON agent_orders(status);
+
+-- Idempotent migration for existing installs
+ALTER TABLE agent_orders ADD COLUMN IF NOT EXISTS journal_entry_id UUID REFERENCES journal_entries(id);
+ALTER TABLE agent_orders ADD COLUMN IF NOT EXISTS pair             TEXT;
+ALTER TABLE agent_orders ADD COLUMN IF NOT EXISTS direction        TEXT;
+ALTER TABLE agent_orders ADD COLUMN IF NOT EXISTS oanda_account_id TEXT;
+ALTER TABLE agent_orders ADD COLUMN IF NOT EXISTS open_price       NUMERIC(18,8);
+ALTER TABLE agent_orders ADD COLUMN IF NOT EXISTS stop_loss        NUMERIC(18,8);
+ALTER TABLE agent_orders ADD COLUMN IF NOT EXISTS take_profit      NUMERIC(18,8);
+ALTER TABLE agent_orders ADD COLUMN IF NOT EXISTS close_price      NUMERIC(18,8);
+ALTER TABLE agent_orders ADD COLUMN IF NOT EXISTS realized_pnl     NUMERIC(18,4);
+ALTER TABLE agent_orders ADD COLUMN IF NOT EXISTS closed_at        TIMESTAMPTZ;
+ALTER TABLE agent_orders ADD COLUMN IF NOT EXISTS close_checked_at TIMESTAMPTZ;
 
 -- Telegram chat subscriptions
 CREATE TABLE IF NOT EXISTS notification_subscriptions (

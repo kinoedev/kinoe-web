@@ -2,6 +2,7 @@ import { sql } from "./client";
 import type {
   JournalEntry, NewJournalEntry, UpdateJournalEntry,
   AgentSettings, NewAgentSettings, AgentRun, AgentCandidate, CandidateDecision,
+  AgentOrder,
 } from "./types";
 
 export async function listJournalEntries(limit = 100): Promise<JournalEntry[]> {
@@ -42,23 +43,6 @@ export async function createJournalEntry(input: NewJournalEntry): Promise<Journa
   return rows[0] as JournalEntry;
 }
 
-export async function findRecentAgentSignal(
-  pair: string,
-  timeframe: string,
-  entryPrice: number
-): Promise<JournalEntry | null> {
-  const rows = await sql`
-    SELECT * FROM journal_entries
-    WHERE source = 'agent_signal'
-      AND pair = ${pair}
-      AND timeframe = ${timeframe}
-      AND entry_price = ${entryPrice}
-      AND created_at > now() - interval '4 hours'
-    ORDER BY created_at DESC
-    LIMIT 1
-  `;
-  return (rows[0] as JournalEntry) ?? null;
-}
 
 export async function updateJournalEntry(
   id: string,
@@ -146,6 +130,12 @@ const DEFAULT_SETTINGS: Omit<AgentSettings, "id" | "created_at" | "updated_at"> 
   allowed_pairs: ["EUR_USD", "GBP_USD", "XAU_USD"],
   allowed_timeframes: ["H4"],
   telegram_chat_id: null,
+  cooldown_after_losses: 3,
+  cooldown_hours: 24,
+  volatility_gate_enabled: false,
+  max_adr_multiplier: 2.5,
+  news_blackout_enabled: false,
+  news_blackout_minutes: 60,
 };
 
 export async function getAgentSettings(): Promise<AgentSettings> {
@@ -156,13 +146,18 @@ export async function getAgentSettings(): Promise<AgentSettings> {
     INSERT INTO agent_settings (
       agent_mode, kill_switch, max_trades_per_day, min_confidence_score,
       min_risk_reward, max_risk_per_trade_pct, allowed_pairs, allowed_timeframes,
-      telegram_chat_id
+      telegram_chat_id, cooldown_after_losses, cooldown_hours,
+      volatility_gate_enabled, max_adr_multiplier,
+      news_blackout_enabled, news_blackout_minutes
     ) VALUES (
       ${DEFAULT_SETTINGS.agent_mode}, ${DEFAULT_SETTINGS.kill_switch},
       ${DEFAULT_SETTINGS.max_trades_per_day}, ${DEFAULT_SETTINGS.min_confidence_score},
       ${DEFAULT_SETTINGS.min_risk_reward}, ${DEFAULT_SETTINGS.max_risk_per_trade_pct},
       ${DEFAULT_SETTINGS.allowed_pairs}, ${DEFAULT_SETTINGS.allowed_timeframes},
-      ${DEFAULT_SETTINGS.telegram_chat_id}
+      ${DEFAULT_SETTINGS.telegram_chat_id},
+      ${DEFAULT_SETTINGS.cooldown_after_losses}, ${DEFAULT_SETTINGS.cooldown_hours},
+      ${DEFAULT_SETTINGS.volatility_gate_enabled}, ${DEFAULT_SETTINGS.max_adr_multiplier},
+      ${DEFAULT_SETTINGS.news_blackout_enabled}, ${DEFAULT_SETTINGS.news_blackout_minutes}
     )
     RETURNING *
   `;
@@ -180,9 +175,15 @@ export async function updateAgentSettings(patch: NewAgentSettings): Promise<Agen
       min_risk_reward        = ${patch.min_risk_reward        ?? current.min_risk_reward},
       max_risk_per_trade_pct = ${patch.max_risk_per_trade_pct ?? current.max_risk_per_trade_pct},
       allowed_pairs          = ${patch.allowed_pairs          ?? current.allowed_pairs},
-      allowed_timeframes     = ${patch.allowed_timeframes     ?? current.allowed_timeframes},
-      telegram_chat_id       = ${patch.telegram_chat_id !== undefined ? patch.telegram_chat_id : current.telegram_chat_id},
-      updated_at             = now()
+      allowed_timeframes      = ${patch.allowed_timeframes      ?? current.allowed_timeframes},
+      telegram_chat_id        = ${patch.telegram_chat_id !== undefined ? patch.telegram_chat_id : current.telegram_chat_id},
+      cooldown_after_losses   = ${patch.cooldown_after_losses   ?? current.cooldown_after_losses},
+      cooldown_hours          = ${patch.cooldown_hours          ?? current.cooldown_hours},
+      volatility_gate_enabled = ${patch.volatility_gate_enabled ?? current.volatility_gate_enabled},
+      max_adr_multiplier      = ${patch.max_adr_multiplier      ?? current.max_adr_multiplier},
+      news_blackout_enabled   = ${patch.news_blackout_enabled   ?? current.news_blackout_enabled},
+      news_blackout_minutes   = ${patch.news_blackout_minutes   ?? current.news_blackout_minutes},
+      updated_at              = now()
     WHERE id = ${current.id}
     RETURNING *
   `;
@@ -283,4 +284,111 @@ export async function countTodayApprovedTrades(): Promise<number> {
       AND created_at < CURRENT_DATE + INTERVAL '1 day'
   `;
   return Number(rows[0]?.count ?? 0);
+}
+
+// ─── Agent order queries ──────────────────────────────────────────────────────
+
+export async function createAgentOrder(data: {
+  candidate_id?: string;
+  journal_entry_id?: string;
+  pair: string;
+  direction?: string | null;
+  oanda_account_id?: string | null;
+  open_price?: number | null;
+  stop_loss?: number | null;
+  take_profit?: number | null;
+}): Promise<AgentOrder> {
+  const rows = await sql`
+    INSERT INTO agent_orders (
+      candidate_id, journal_entry_id, pair, direction,
+      oanda_account_id, open_price, stop_loss, take_profit, status
+    ) VALUES (
+      ${data.candidate_id ?? null}, ${data.journal_entry_id ?? null},
+      ${data.pair}, ${data.direction ?? null},
+      ${data.oanda_account_id ?? null},
+      ${data.open_price ?? null}, ${data.stop_loss ?? null}, ${data.take_profit ?? null},
+      'OPEN'
+    )
+    RETURNING *
+  `;
+  return rows[0] as AgentOrder;
+}
+
+export async function listOpenAgentOrders(): Promise<AgentOrder[]> {
+  const rows = await sql`
+    SELECT * FROM agent_orders WHERE status = 'OPEN' ORDER BY created_at ASC
+  `;
+  return rows as AgentOrder[];
+}
+
+export async function closeAgentOrder(
+  id: string,
+  data: { close_price: number; realized_pnl: number; closed_at: string; oanda_trade_id?: string }
+): Promise<AgentOrder | null> {
+  const rows = await sql`
+    UPDATE agent_orders SET
+      status           = 'CLOSED',
+      close_price      = ${data.close_price},
+      realized_pnl     = ${data.realized_pnl},
+      closed_at        = ${data.closed_at},
+      close_checked_at = now(),
+      oanda_trade_id   = COALESCE(${data.oanda_trade_id ?? null}, oanda_trade_id)
+    WHERE id = ${id}
+    RETURNING *
+  `;
+  return (rows[0] as AgentOrder) ?? null;
+}
+
+export async function stampOrderCloseChecked(id: string): Promise<void> {
+  await sql`UPDATE agent_orders SET close_checked_at = now() WHERE id = ${id}`;
+}
+
+export async function listOpenAgentJournalEntries(): Promise<JournalEntry[]> {
+  const rows = await sql`
+    SELECT * FROM journal_entries
+    WHERE source = 'agent' AND (outcome = 'OPEN' OR outcome IS NULL)
+    ORDER BY entered_at ASC NULLS LAST
+  `;
+  return rows as JournalEntry[];
+}
+
+export async function closeJournalEntry(
+  id: string,
+  data: { exit_price: number; realized_pnl: number; r_multiple: number; outcome: "WIN" | "LOSS" | "BE"; exited_at: string }
+): Promise<JournalEntry | null> {
+  const rows = await sql`
+    UPDATE journal_entries SET
+      exit_price = ${data.exit_price},
+      pnl        = ${data.realized_pnl},
+      r_multiple = ${data.r_multiple},
+      outcome    = ${data.outcome},
+      exited_at  = ${data.exited_at},
+      updated_at = now()
+    WHERE id = ${id}
+    RETURNING *
+  `;
+  return (rows[0] as JournalEntry) ?? null;
+}
+
+export async function getTrailingConsecutiveLosses(): Promise<{
+  count: number;
+  lastLossAt: string | null;
+}> {
+  const rows = await sql`
+    SELECT outcome, exited_at FROM journal_entries
+    WHERE outcome IN ('WIN','LOSS','BE')
+    ORDER BY exited_at DESC NULLS LAST
+    LIMIT 10
+  `;
+  let count = 0;
+  let lastLossAt: string | null = null;
+  for (const row of rows as { outcome: string; exited_at: string | null }[]) {
+    if (row.outcome === "LOSS") {
+      count++;
+      if (!lastLossAt) lastLossAt = row.exited_at;
+    } else {
+      break;
+    }
+  }
+  return { count, lastLossAt };
 }

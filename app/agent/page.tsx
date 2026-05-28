@@ -164,6 +164,7 @@ export default function AgentPage() {
       const s = sData.settings;
       s.min_risk_reward = Number(s.min_risk_reward);
       s.max_risk_per_trade_pct = Number(s.max_risk_per_trade_pct);
+      s.max_adr_multiplier = Number(s.max_adr_multiplier);
       setSettings(s);
       setDraft(s);
     }
@@ -530,6 +531,152 @@ export default function AgentPage() {
               </div>
             </Section>
 
+            {/* Risk Engine */}
+            <Section title="Risk Engine">
+              <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+
+                {/* Cooldown */}
+                <div className="space-y-3">
+                  <div className="text-[10px] text-white/30 uppercase tracking-widest">Consecutive Loss Cooldown</div>
+
+                  <div>
+                    <label className="text-[10px] text-white/40 uppercase tracking-wider">Pause after N consecutive losses</label>
+                    <div className="mt-1 flex items-center gap-3">
+                      <input
+                        type="range" min={0} max={6} step={1}
+                        value={d.cooldown_after_losses ?? settings.cooldown_after_losses}
+                        onChange={(e) => setDraft((d) => ({ ...d, cooldown_after_losses: Number(e.target.value) }))}
+                        className="flex-1 accent-purple-500"
+                      />
+                      <span className="w-12 text-right text-xs text-white/70 font-mono">
+                        {(d.cooldown_after_losses ?? settings.cooldown_after_losses) === 0
+                          ? "Off"
+                          : `${d.cooldown_after_losses ?? settings.cooldown_after_losses} loss${(d.cooldown_after_losses ?? settings.cooldown_after_losses) !== 1 ? "es" : ""}`}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] text-white/40 uppercase tracking-wider">Cooldown Duration</label>
+                    <div className="mt-1 flex items-center gap-3">
+                      <input
+                        type="range" min={4} max={72} step={4}
+                        value={d.cooldown_hours ?? settings.cooldown_hours}
+                        onChange={(e) => setDraft((d) => ({ ...d, cooldown_hours: Number(e.target.value) }))}
+                        className="flex-1 accent-purple-500"
+                      />
+                      <span className="w-12 text-right text-xs text-white/70 font-mono">
+                        {d.cooldown_hours ?? settings.cooldown_hours}h
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="text-[10px] text-white/20 leading-relaxed pt-1">
+                    Checks your journal. If the last {d.cooldown_after_losses ?? settings.cooldown_after_losses} closed trades are all losses, scanning pauses for {d.cooldown_hours ?? settings.cooldown_hours} hours.
+                    Set to 0 to disable.
+                  </div>
+                </div>
+
+                {/* Volatility Gate */}
+                <div className="space-y-3">
+                  <div className="text-[10px] text-white/30 uppercase tracking-widest">Volatility Gate</div>
+
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-xs text-white/70">Enable Volatility Gate</div>
+                      <div className="text-[10px] text-white/30 mt-0.5">Skip pairs during news spikes or dead markets</div>
+                    </div>
+                    <button
+                      onClick={() => setDraft((d) => ({ ...d, volatility_gate_enabled: !(d.volatility_gate_enabled ?? settings.volatility_gate_enabled) }))}
+                      className={[
+                        "relative inline-flex h-6 w-11 items-center rounded-full border transition-colors",
+                        (d.volatility_gate_enabled ?? settings.volatility_gate_enabled)
+                          ? "bg-purple-500/70 border-purple-500/50"
+                          : "bg-white/10 border-white/20",
+                      ].join(" ")}
+                    >
+                      <span className={[
+                        "inline-block h-4 w-4 rounded-full bg-white shadow transition-transform",
+                        (d.volatility_gate_enabled ?? settings.volatility_gate_enabled) ? "translate-x-6" : "translate-x-1",
+                      ].join(" ")} />
+                    </button>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] text-white/40 uppercase tracking-wider">Max ADR Multiplier (spike filter)</label>
+                    <div className="mt-1 flex items-center gap-3">
+                      <input
+                        type="range" min={1.5} max={4.0} step={0.25}
+                        value={d.max_adr_multiplier ?? settings.max_adr_multiplier}
+                        onChange={(e) => setDraft((d) => ({ ...d, max_adr_multiplier: Number(e.target.value) }))}
+                        disabled={!(d.volatility_gate_enabled ?? settings.volatility_gate_enabled)}
+                        className="flex-1 accent-purple-500 disabled:opacity-30"
+                      />
+                      <span className="w-12 text-right text-xs text-white/70 font-mono">
+                        {Number(d.max_adr_multiplier ?? settings.max_adr_multiplier).toFixed(2)}x
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="text-[10px] text-white/20 leading-relaxed pt-1">
+                    Skip pair if today{`'`}s range is {`>`}{Number(d.max_adr_multiplier ?? settings.max_adr_multiplier).toFixed(2)}x the 14-day average range (news spike) or {`<`}30% of average (dead market).
+                  </div>
+                </div>
+              </div>
+            </Section>
+
+            {/* News Blackout */}
+            <Section title="News Blackout">
+              <div className="flex items-start justify-between gap-6">
+                <div className="flex-1 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-xs text-white/70">Enable News Blackout</div>
+                      <div className="text-[10px] text-white/30 mt-0.5">
+                        Skip pairs when a high-impact news event is imminent (Forex Factory feed)
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setDraft((d) => ({ ...d, news_blackout_enabled: !(d.news_blackout_enabled ?? settings.news_blackout_enabled) }))}
+                      className={[
+                        "relative inline-flex h-6 w-11 items-center rounded-full border transition-colors shrink-0",
+                        (d.news_blackout_enabled ?? settings.news_blackout_enabled)
+                          ? "bg-orange-500/70 border-orange-500/50"
+                          : "bg-white/10 border-white/20",
+                      ].join(" ")}
+                    >
+                      <span className={[
+                        "inline-block h-4 w-4 rounded-full bg-white shadow transition-transform",
+                        (d.news_blackout_enabled ?? settings.news_blackout_enabled) ? "translate-x-6" : "translate-x-1",
+                      ].join(" ")} />
+                    </button>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] text-white/40 uppercase tracking-wider">
+                      Blackout window (minutes before &amp; after event)
+                    </label>
+                    <div className="mt-1 flex items-center gap-3">
+                      <input
+                        type="range" min={15} max={120} step={15}
+                        value={d.news_blackout_minutes ?? settings.news_blackout_minutes}
+                        onChange={(e) => setDraft((d) => ({ ...d, news_blackout_minutes: Number(e.target.value) }))}
+                        disabled={!(d.news_blackout_enabled ?? settings.news_blackout_enabled)}
+                        className="flex-1 accent-orange-500 disabled:opacity-30"
+                      />
+                      <span className="w-12 text-right text-xs text-white/70 font-mono">
+                        {d.news_blackout_minutes ?? settings.news_blackout_minutes}m
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="text-[10px] text-white/20 leading-relaxed">
+                    Fetches this week&apos;s Forex Factory high-impact calendar. Skips any pair whose currencies have an event within ±{d.news_blackout_minutes ?? settings.news_blackout_minutes} minutes. Feed is cached per scan run — no API key needed.
+                  </div>
+                </div>
+              </div>
+            </Section>
+
             {/* Telegram */}
             <Section title="Telegram Alerts">
               <div className="space-y-3">
@@ -670,6 +817,23 @@ export default function AgentPage() {
                 <span className={d.telegram_chat_id ?? settings.telegram_chat_id ? "text-emerald-400 font-mono" : "text-white/20"}>
                   {d.telegram_chat_id ?? settings.telegram_chat_id ?? "Not configured"}
                 </span>
+              } />
+              <Row label="Cooldown after losses" value={
+                <span className="font-mono">
+                  {(d.cooldown_after_losses ?? settings.cooldown_after_losses) === 0
+                    ? "Disabled"
+                    : `${d.cooldown_after_losses ?? settings.cooldown_after_losses} losses → ${d.cooldown_hours ?? settings.cooldown_hours}h pause`}
+                </span>
+              } />
+              <Row label="Volatility gate" value={
+                (d.volatility_gate_enabled ?? settings.volatility_gate_enabled)
+                  ? <span className="text-purple-400 font-mono">On — {Number(d.max_adr_multiplier ?? settings.max_adr_multiplier).toFixed(2)}x ADR</span>
+                  : <span className="text-white/30">Off</span>
+              } />
+              <Row label="News blackout" value={
+                (d.news_blackout_enabled ?? settings.news_blackout_enabled)
+                  ? <span className="text-orange-400 font-mono">On — ±{d.news_blackout_minutes ?? settings.news_blackout_minutes}m window</span>
+                  : <span className="text-white/30">Off</span>
               } />
               <Row label="Trade execution" value={<span className="text-yellow-400/80">Disabled — Phase 1 (alerts only)</span>} />
             </Section>

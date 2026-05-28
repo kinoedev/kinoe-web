@@ -69,6 +69,7 @@ export default function Sidebar(_props: SidebarProps = {}) {
     { label: "Signals", href: "/signals" },
     { label: "Journal", href: "/journal" },
     { label: "Agent", href: "/agent" },
+    { label: "Analytics", href: "/analytics" },
     { label: "Market", href: "/market" },
     { label: "Settings", href: "/settings" },
   ];

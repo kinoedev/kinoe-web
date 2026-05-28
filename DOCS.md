@@ -35,11 +35,14 @@ A private trading platform for naked forex/CFD price action. Tracks signals, jou
 
 ## Accounts you need
 
-1. **Vercel** — free tier works. Used for hosting and environment variables.
-2. **Neon** — free tier works. Serverless Postgres. Get the `DATABASE_URL` (pooled connection string).
-3. **OANDA** — practice account is free. Get an API key from your account portal. Practice and live use different base URLs (handled automatically).
-4. **Anthropic API** — pay-as-you-go. Used for signal summaries and journal grading. ~$0.01 per scan, ~$0.01–0.05 per journal grade.
-5. **OpenAI API** _(optional)_ — alternative AI provider for journal grading only.
+| Service | Link | Notes |
+|---|---|---|
+| **Vercel** | [vercel.com](https://vercel.com) | Free tier works. Hosts the app and stores env vars. |
+| **Neon** | [neon.tech](https://neon.tech) | Free tier works. Serverless Postgres. Copy the pooled `DATABASE_URL`. |
+| **OANDA** | [oanda.com](https://www.oanda.com) | Practice account is free. API key is in My Account → API Access. |
+| **Anthropic** | [console.anthropic.com](https://console.anthropic.com) | Pay-as-you-go. ~$0.01 per scan, ~$0.01–0.05 per journal grade. |
+| **OpenAI** _(optional)_ | [platform.openai.com](https://platform.openai.com) | Only needed if using OpenAI for journal grading instead of Anthropic. |
+| **Telegram** | [t.me/BotFather](https://t.me/BotFather) | Create a bot → get `TELEGRAM_BOT_TOKEN`. Then message [@userinfobot](https://t.me/userinfobot) to get your `TELEGRAM_CHAT_ID`. |
 
 ---
 
@@ -133,7 +136,7 @@ The script is idempotent — every `CREATE` uses `IF NOT EXISTS`. Safe to re-run
 | `ai_grade` | TEXT | A / B / C / D / F |
 | `ai_score` | INT | 0–100 |
 | `ai_review_md` | TEXT | AI-generated critique |
-| `source` | TEXT | `manual` or `agent_signal` |
+| `source` | TEXT | `kierra` (manual entry) or `agent` (approved signal) |
 
 **`backtests`** — future use, table is created but not yet wired to UI.
 
@@ -162,9 +165,21 @@ Next.js 16 silently ignores `middleware.ts` exports not named `middleware`. The 
 
 The scanner runs in two strict phases. AI cannot invent values.
 
-### Phase 1 — Rule engine (`lib/signals/detection.ts`)
+### Phase 1 — Rule engine (`lib/signals/`)
 
-Called for each pair with 100 H4 candles + 50 D1 candles from OANDA. Returns a `PairAnalysisResult` with:
+The rule engine is split into focused sub-modules (each under 100 lines):
+
+| File | Responsibility |
+|---|---|
+| `candles.ts` | OANDA candle parser, `OandaCandle` / `ParsedCandle` types |
+| `bias.ts` | `getTrendBias` (H4) and `getHigherTimeframeBias` (D1) |
+| `patterns.ts` | `detectKangarooTail`, `detectBigShadow`, `detectInsideBar` |
+| `levels.ts` | `extractKeyLevelsDetailed`, `calculateMarketState`, `calculateADR` |
+| `confidence.ts` | Weighted confidence scoring with full `ConfidenceBreakdown`, blockers, trigger conditions |
+| `planner.ts` | `buildTradePlan` — entry trigger, SL, TP, RR, invalidation |
+| `detection.ts` | Thin orchestrator — imports all sub-modules, exports `runFullPairAnalysis` |
+
+`runFullPairAnalysis(pair, h4Candles, d1Candles, utcHour?)` returns `PairAnalysisResult`:
 
 | Field | Description |
 |---|---|
@@ -174,27 +189,33 @@ Called for each pair with 100 H4 candles + 50 D1 candles from OANDA. Returns a `
 | `setupDetected` | Boolean — any valid pattern on the latest candle |
 | `setupType` | `Kangaroo Tail`, `Big Shadow`, `Inside Bar`, or null |
 | `keyLevels` | Up to 6 swing levels, each with `strengthScore` (0–100) and `reason` |
-| `confidenceScore` | 0–100 composite score (see algorithm below) |
+| `confidenceScore` | 0–100 composite score |
+| `confidenceBreakdown` | Per-factor breakdown (stored in `analysis_json` for audit) |
 | `tradeStatus` | `TRADE_READY`, `WATCHLIST`, `NO_TRADE`, `AVOID` |
 | `blockers` | List of reasons why this is not a clean trade |
 | `triggerConditions` | What to watch for to enter |
 | `potentialTradePlan` | Entry trigger, stop loss, take profit, RR, invalidation |
 
-**Confidence score algorithm (max 100):**
+**Confidence score — weighted multi-factor (max 100):**
 
-```
-H4 bias not NEUTRAL          +15
-D1 bias matches H4           +20
-Kangaroo Tail setup          +30
-Big Shadow setup             +25
-Inside Bar setup             +15
-Market state TRENDING        +15
-Market state BREAKOUT        +10
-Market state REVERSAL        -10
-Strong level nearby (≥70, within 0.3%)  +15
-Medium level nearby (≥50, within 0.5%)  +8
-RR ≥ 3:1                     +5
-```
+| Factor | Range | Notes |
+|---|---|---|
+| H4 trend | 0–20 | H4 bias is directional |
+| D1 alignment | 0–20 | D1 agrees with H4 direction |
+| Setup pattern | 0–25 | KT=25, Big Shadow=20, Inside Bar=12 |
+| Key level proximity | 0–15 | Strong level within 0.3% (+15) or medium within 0.5% (+8) |
+| Session timing | 0–15 | London+NY overlap=15, London=12, NY=10, Tokyo=5, dead=0 |
+| Market state | −10 to +8 | TRENDING=+8, BREAKOUT=+5, RANGING=-5, REVERSAL=-10 |
+| Structure zone | −15 to +15 | Entry at HL/LH zone=+15, counter-structure=−15 |
+| R:R quality | 0–5 | R:R ≥ 3.5 = +5, ≥ 3 = +3 |
+
+**Naked forex rules built into the engine:**
+
+- **50% body rule** — KT close must land in the correct half of the candle range (upper half for bullish, lower half for bearish). Rejects weak rejections that technically have a long wick but no follow-through. Same rule applied to Big Shadow.
+- **ATR buffer on SL** — Stop loss is set 0.3× ATR14 beyond the candle extreme. Prevents noise stop-outs from wicks that don't represent actual invalidation.
+- **Clear path filter** — Before marking a setup TRADE_READY, checks that no key level with strength ≥ 60 sits between entry and target within 1R. Adds a blocker if path is obstructed.
+- **Market structure (HH/HL/LH/LL)** — Detects swing structure from the last 100 H4 candles. Bullish structure (series of HH+HL), bearish structure (LH+LL). +15 confidence when entry is at a structural HL or LH zone. −15 when entry is counter-structure. Structural zone = within 0.5% of last HL (long) or LH (short).
+- **Structure vs bias blocker** — If H4 bias and detected structure directly conflict (e.g., H4 bullish but market making LH+LL), adds a hard blocker.
 
 **Trade status rules:**
 - `AVOID` — H4 and D1 biases conflict (trap risk)
@@ -264,8 +285,6 @@ The status dot in the sidebar polls `/api/agent/status` every 60 seconds. If OAN
 | POST | `/api/auth/login` | Validates password, sets auth cookie |
 | POST | `/api/auth/logout` | Clears auth cookie |
 | GET | `/api/agent/status` | OANDA account ping — returns balance + connectivity |
-| GET | `/api/agent/signal` | Single-pair KT scan on EUR_USD H4 (used by Terminal page) |
-| POST | `/api/agent/signal/log` | Auto-log current signal to journal (dedupes within 4h) |
 | POST | `/api/signals/scan` | Full 3-pair scan: rule engine → AI summaries |
 | GET | `/api/journal` | List all journal entries |
 | POST | `/api/journal` | Create a new journal entry |
@@ -284,6 +303,7 @@ The status dot in the sidebar polls `/api/agent/status` every 60 seconds. If OAN
 | POST | `/api/agent/telegram/test` | Send test message to Telegram |
 | POST | `/api/agent/telegram/setup` | Register Telegram webhook URL |
 | POST | `/api/agent/telegram/webhook` | Receive Telegram button taps (approve/deny) |
+| POST | `/api/agent/close-check` | Poll OANDA for closed trades, auto-close matching journal entries, send Telegram review prompt |
 
 ---
 
@@ -300,15 +320,46 @@ The agent is a controlled scanner that finds setups, notifies you on Telegram, a
 | `APPROVAL_REQUIRED` | Sends alerts with Approve / Deny / Journal buttons. Approved trades auto-log to journal. |
 | `DEMO_AUTO` | Not yet active. Reserved for future demo auto-trading. |
 
+### Risk engine (`lib/risk/engine.ts`)
+
+Global risk checks run before every scan. A failed check blocks the entire run and logs the reason to `agent_runs.error`.
+
+| Check | What it does |
+|---|---|
+| **Consecutive loss cooldown** | Queries last N closed journal entries. If all are `LOSS`, pauses scanning for `cooldown_hours`. Configurable threshold. Set to 0 to disable. |
+| **Volatility gate** (per pair) | Compares today's D1 range to the 14-day ADR. Skips pair if range > `max_adr_multiplier × avg` (news spike) or < 30% of avg (dead market). |
+
+Risk settings are stored in `agent_settings` and configurable from the Agent page:
+
+| Setting | Default | Description |
+|---|---|---|
+| `cooldown_after_losses` | 3 | Consecutive losses before cooldown. 0 = disabled |
+| `cooldown_hours` | 24 | Hours to pause after cooldown triggers |
+| `volatility_gate_enabled` | false | Enable/disable per-pair volatility check |
+| `max_adr_multiplier` | 2.5 | Skip pair if today's range > this × 14-day ADR |
+
+### Scanner service (`lib/agent/scanner.ts`)
+
+`scanPairs(config)` handles:
+1. Parallel OANDA candle fetches for all pairs (H4 + D1)
+2. Per-pair volatility gate check (if enabled)
+3. `runFullPairAnalysis` for each passing pair
+
+Returns `{ analyses, skipped, errors }` — pairs that fail the volatility gate appear in `skipped` rather than errors.
+
 ### Filters applied before alerting
 
 A candidate must pass all of the following to generate a Telegram alert:
 
+- Kill switch is off
+- Agent mode is not `OFF`
+- Daily approved trade count < `max_trades_per_day`
+- Global risk checks pass (consecutive loss cooldown)
 - `confidenceScore >= min_confidence_score` (default 75)
 - `tradeStatus` is `TRADE_READY` or `WATCHLIST` (not `NO_TRADE` or `AVOID`)
 - `riskReward >= min_risk_reward` (default 3.0)
 - Pair is in `allowed_pairs`
-- Daily approved trade count < `max_trades_per_day`
+- Per-pair volatility gate passes (if enabled)
 
 ### Telegram setup
 
@@ -340,7 +391,7 @@ Blockers: None
 
 Buttons: `✅ Approve` | `❌ Deny` | `📓 Journal Only`
 
-Tapping Approve or Journal Only creates a journal entry automatically with `source = 'agent_signal'`.
+Tapping Approve creates a journal entry with `source = 'agent'` and starts OANDA close tracking. Journal Only also creates an entry but skips the trade plan. Manual entries on the journal page use `source = 'kierra'`.
 
 ### New database tables
 
@@ -350,8 +401,35 @@ Tapping Approve or Journal Only creates a journal entry automatically with `sour
 | `agent_runs` | One row per scan — how many pairs, candidates, errors |
 | `agent_candidates` | Every setup the agent evaluated, with its decision |
 | `agent_decisions` | Audit trail for approve/deny actions |
-| `agent_orders` | Placeholder for future OANDA order tracking |
+| `agent_orders` | One row per approved trade — stores OANDA trade ID, open/close prices, P&L; polled by close-check |
 | `notification_subscriptions` | Telegram chat IDs / web push endpoints |
+
+### Trade auto-close tracking
+
+When a trade is approved via Telegram:
+1. A `journal_entry` is created with `source = 'agent'`, `outcome = 'OPEN'`
+2. An `agent_order` row is created linking the candidate to the journal entry
+3. `POST /api/agent/close-check` polls OANDA for recently closed trades on the same pair
+
+**Matching logic** — finds a closed OANDA trade where:
+- Same instrument (pair)
+- Same direction (positive units = LONG, negative = SHORT)
+- OANDA `openTime` is within 6 hours of the journal `entered_at`
+
+When a match is found:
+- `agent_order` is marked `CLOSED` with close price, realised P&L, and OANDA trade ID
+- `journal_entry` is updated: `exit_price`, `pnl`, `r_multiple`, `outcome` (WIN/LOSS/BE), `exited_at`
+- Telegram sends a review prompt: *"EUR/USD LONG closed WIN +2.1R — Why did you approve this trade?"*
+
+**To run close-check automatically**, add it to your cron:
+```
+POST https://your-app.vercel.app/api/agent/close-check
+```
+Or call it alongside `/api/agent/run` — it's a quick poll with no AI cost.
+
+**For Kierra-suggested trades** (manual journal entries), close tracking is not automatic. Update the exit manually via the journal entry edit page, then use "Grade with AI" to trigger the reflection flow.
+
+---
 
 ### Scheduled scanning
 
@@ -382,46 +460,70 @@ Add to `vercel.json`:
 kinoe-web/
 ├── app/
 │   ├── api/
-│   │   ├── agent/signal/         # Single-pair KT scan + journal log
+│   │   ├── agent/run/            # POST — run scanner + risk checks + Telegram alerts
+│   │   ├── agent/settings/       # GET/PATCH agent settings
+│   │   ├── agent/runs/           # GET recent runs
+│   │   ├── agent/candidates/     # GET recent candidates
 │   │   ├── agent/status/         # OANDA connectivity check
+│   │   ├── agent/telegram/       # test, setup, webhook routes
 │   │   ├── auth/                 # Login / logout
 │   │   ├── journal/              # CRUD + AI grader
+│   │   ├── market/prices/        # Live OANDA prices for market page
 │   │   ├── oanda/account/        # Account summary
 │   │   ├── settings/             # Env health + spend stats
-│   │   └── signals/scan/         # Full market scan
+│   │   └── signals/scan/         # Full market scan (signals page)
+│   ├── agent/page.tsx            # Agent Control Center
 │   ├── charts/page.tsx           # Full-screen TradingView chart
 │   ├── journal/                  # List, new entry, single entry pages
 │   ├── login/page.tsx            # Password login
+│   ├── market/page.tsx           # Session timeline, live prices, TradingView widgets
 │   ├── settings/page.tsx         # Settings dashboard
 │   ├── signals/page.tsx          # Market scan UI
 │   ├── terminal/page.tsx         # Home dashboard
-│   ├── layout.tsx                # Root layout
+│   ├── layout.tsx                # Root layout (includes BottomNav globally)
 │   └── page.tsx                  # Redirects to /terminal
 │
 ├── components/
+│   ├── BottomNav.tsx             # Mobile bottom navigation (md:hidden)
 │   ├── ChartPanel.tsx            # TradingView widget (Terminal page)
-│   ├── Sidebar.tsx               # Nav + OANDA status dot
+│   ├── Sidebar.tsx               # Nav + OANDA status dot (hidden on mobile)
 │   ├── SignalPanel.tsx           # Single-pair KT signal card
-│   └── Topbar.tsx                # Page header
+│   └── Topbar.tsx                # Page header + Market Pulse dropdown
 │
 ├── lib/
+│   ├── agent/
+│   │   └── scanner.ts            # Fetch candles, run analysis, volatility gate per pair
+│   ├── oanda/
+│   │   └── account.ts            # Fetch open/closed OANDA trades for close-check matching
 │   ├── ai/
 │   │   ├── anthropic.ts          # Anthropic client wrapper
-│   │   ├── grader.ts             # Journal grading logic
-│   │   ├── openai.ts             # OpenAI client wrapper
-│   │   ├── pricing.ts            # Token cost calculator (Anthropic + OpenAI)
+│   │   ├── grader.ts             # Journal grading logic (Anthropic or OpenAI)
+│   │   ├── openai.ts             # OpenAI fallback for journal grading
+│   │   ├── pricing.ts            # Token cost calculator
 │   │   ├── prompts.ts            # Shared prompt templates
-│   │   ├── scanner.ts            # Signal summariser (summary-only, no invented values)
-│   │   └── types.ts              # Shared AI types (Usage, etc.)
+│   │   ├── scanner.ts            # Signal summariser (summary-only)
+│   │   └── types.ts              # Shared AI types
 │   ├── db/
 │   │   ├── client.ts             # Neon SQL client
 │   │   ├── migrate.ts            # Migration runner (CLI)
 │   │   ├── queries.ts            # All database queries
-│   │   ├── schema.sql            # Table definitions
+│   │   ├── schema.sql            # Table definitions (idempotent)
 │   │   └── types.ts              # TypeScript types for DB rows
+│   ├── risk/
+│   │   └── engine.ts             # Global + per-pair risk checks
 │   ├── signals/
-│   │   └── detection.ts          # Full rule engine — patterns, scoring, trade plans
+│   │   ├── bias.ts               # getTrendBias, getHigherTimeframeBias
+│   │   ├── candles.ts            # parseCandles, OandaCandle / ParsedCandle types
+│   │   ├── confidence.ts         # Weighted scoring, ConfidenceBreakdown, blockers
+│   │   ├── detection.ts          # Orchestrator — exports runFullPairAnalysis
+│   │   ├── levels.ts             # Key levels, market state, ADR calculation
+│   │   ├── patterns.ts           # KT, Big Shadow, Inside Bar detectors
+│   │   └── planner.ts            # TradePlan builder
 │   └── auth.ts                   # HMAC cookie sign/verify
+│
+├── public/
+│   ├── icon.svg                  # PWA app icon
+│   └── manifest.json             # PWA manifest
 │
 ├── proxy.ts                      # Auth middleware (Next.js 16 — must be named proxy.ts)
 ├── next.config.ts
@@ -460,8 +562,8 @@ The auth gate is in `proxy.ts` (not `middleware.ts`). Next.js 16 silently ignore
 |---|---|
 | Different pairs | Edit `PAIRS` array in `app/api/signals/scan/route.ts` |
 | Different timeframe | Change `granularity=H4` in the OANDA fetch calls + update `runFullPairAnalysis` |
-| Different broker (not OANDA) | Swap the fetch calls in scan route and status route. `parseCandles()` in `detection.ts` expects `{complete, time, mid: {o,h,l,c}}` — adapt the parser to your broker's candle format. |
-| Add more patterns | Add detection functions in `lib/signals/detection.ts`, wire into `runFullPairAnalysis`, update confidence scoring |
+| Different broker (not OANDA) | Swap the fetch calls in `lib/agent/scanner.ts`. `parseCandles()` in `lib/signals/candles.ts` expects `{complete, time, mid: {o,h,l,c}}` — adapt the parser to your broker's candle format. |
+| Add more patterns | Add detection functions in `lib/signals/patterns.ts`, wire into `runFullPairAnalysis` in `detection.ts`, update confidence scoring in `lib/signals/confidence.ts`. |
 | Multi-user | Replace the single-password auth with NextAuth or Clerk. The rest of the app is user-agnostic. |
 | Custom domain | Set in Vercel → Domains |
 

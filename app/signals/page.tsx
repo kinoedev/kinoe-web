@@ -96,7 +96,10 @@ function TradePlanCard({ plan }: { plan: TradePlan }) {
         <span className={`text-xs font-medium ${isLong ? "text-emerald-200" : "text-red-200"}`}>
           {isLong ? "▲ LONG" : "▼ SHORT"}
         </span>
-        <span className="text-[10px] text-white/40">RR {plan.riskReward}:1</span>
+        <div className="flex items-center gap-2 text-[10px] text-white/40">
+          <span>RR {plan.riskReward}:1</span>
+          {plan.riskPips ? <span className="text-white/25">· {plan.riskPips} pips risk</span> : null}
+        </div>
       </div>
       <div className="mb-3 grid grid-cols-3 gap-2 text-center">
         <div className="rounded-lg border border-white/10 bg-black/30 p-2">
@@ -167,6 +170,19 @@ function PairCard({ data }: { data: PairResult }) {
             {data.marketState}
           </div>
         </div>
+        <div className="rounded-lg border border-white/10 bg-black/20 p-2">
+          <div className="mb-0.5 text-[9px] text-white/30">Structure</div>
+          <div className={`text-[10px] font-medium ${
+            data.structureAnalysis?.bias === "BULLISH" ? "text-emerald-400"
+            : data.structureAnalysis?.bias === "BEARISH" ? "text-red-400"
+            : "text-white/30"
+          }`}>
+            {data.structureAnalysis?.bias ?? "NEUTRAL"}
+            {data.structureAnalysis?.nearStructuralZone && (
+              <span className="ml-1 text-purple-400">IN ZONE</span>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* Setup */}
@@ -197,8 +213,28 @@ function PairCard({ data }: { data: PairResult }) {
       {/* Trade plan */}
       {data.potentialTradePlan ? (
         <div>
-          <div className="mb-2 text-[10px] uppercase tracking-widest text-white/30">Trade Plan</div>
+          <div className="mb-2 text-[10px] uppercase tracking-widest text-white/30">H4 Trade Plan</div>
           <TradePlanCard plan={data.potentialTradePlan} />
+        </div>
+      ) : null}
+
+      {/* M15 precision entry */}
+      {data.m15EntryPlan ? (
+        <div>
+          <div className="mb-1.5 flex items-center gap-2">
+            <div className="text-[10px] uppercase tracking-widest text-white/30">M15 Entry</div>
+            <span className="rounded-full border border-blue-500/30 bg-blue-500/10 px-2 py-0.5 text-[9px] text-blue-300">
+              {data.m15SetupType}
+            </span>
+          </div>
+          <TradePlanCard plan={data.m15EntryPlan} />
+          {data.m15Note ? (
+            <div className="mt-1.5 text-[9px] text-white/30 leading-relaxed">{data.m15Note}</div>
+          ) : null}
+        </div>
+      ) : data.tradeStatus === "TRADE_READY" ? (
+        <div className="rounded-lg border border-white/5 bg-black/20 px-3 py-2">
+          <div className="text-[9px] text-white/25">{data.m15Note || "No M15 confirmation yet — wait for trigger"}</div>
         </div>
       ) : null}
 

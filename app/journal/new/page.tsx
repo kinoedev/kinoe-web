@@ -59,6 +59,7 @@ export default function NewJournalEntryPage() {
       risk_pct: asNum(riskPct) !== null ? Number(asNum(riskPct)) / 100 : null,
       entered_at: new Date().toISOString(),
       thesis_md: thesis || null,
+      source: "kierra",
     };
 
     try {
