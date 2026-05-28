@@ -103,6 +103,7 @@ export type AgentSettings = {
   max_adr_multiplier: number;
   news_blackout_enabled: boolean;
   news_blackout_minutes: number;
+  scan_sessions: string[];
 };
 
 export type AgentRun = {

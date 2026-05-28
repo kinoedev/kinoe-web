@@ -118,7 +118,8 @@ CREATE TABLE IF NOT EXISTS agent_settings (
   volatility_gate_enabled BOOLEAN NOT NULL DEFAULT false,
   max_adr_multiplier      NUMERIC(4,2) NOT NULL DEFAULT 2.5,
   news_blackout_enabled   BOOLEAN NOT NULL DEFAULT false,
-  news_blackout_minutes   INT NOT NULL DEFAULT 60
+  news_blackout_minutes   INT NOT NULL DEFAULT 60,
+  scan_sessions           TEXT[] NOT NULL DEFAULT '{london,new_york}'
 );
 
 -- Add risk columns to existing installs (idempotent)
@@ -128,6 +129,7 @@ ALTER TABLE agent_settings ADD COLUMN IF NOT EXISTS volatility_gate_enabled BOOL
 ALTER TABLE agent_settings ADD COLUMN IF NOT EXISTS max_adr_multiplier      NUMERIC(4,2) NOT NULL DEFAULT 2.5;
 ALTER TABLE agent_settings ADD COLUMN IF NOT EXISTS news_blackout_enabled   BOOLEAN NOT NULL DEFAULT false;
 ALTER TABLE agent_settings ADD COLUMN IF NOT EXISTS news_blackout_minutes   INT NOT NULL DEFAULT 60;
+ALTER TABLE agent_settings ADD COLUMN IF NOT EXISTS scan_sessions           TEXT[] NOT NULL DEFAULT '{london,new_york}';
 
 -- One row per scanner run (manual or scheduled)
 CREATE TABLE IF NOT EXISTS agent_runs (

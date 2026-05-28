@@ -27,6 +27,25 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, reason: "Agent mode is OFF." });
     }
 
+    // Session gate: only scan during enabled H4-close sessions (skip for manual triggers)
+    if (triggeredBy !== "manual" && settings.scan_sessions?.length > 0) {
+      const utcHour = new Date().getUTCHours();
+      const SESSION_HOURS: Record<string, number[]> = {
+        asian: [0, 4],
+        london: [8, 12],
+        new_york: [12, 16, 20],
+      };
+      const activeSessions = settings.scan_sessions.filter((s) =>
+        SESSION_HOURS[s]?.includes(utcHour)
+      );
+      if (activeSessions.length === 0) {
+        return NextResponse.json({
+          ok: false,
+          reason: `Outside scan sessions (${settings.scan_sessions.join(", ")}). UTC hour: ${utcHour}.`,
+        });
+      }
+    }
+
     const apiKey = process.env.OANDA_API_KEY;
     if (!apiKey) {
       return NextResponse.json({ ok: false, reason: "Missing OANDA_API_KEY." }, { status: 500 });

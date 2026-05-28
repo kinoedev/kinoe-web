@@ -136,6 +136,7 @@ const DEFAULT_SETTINGS: Omit<AgentSettings, "id" | "created_at" | "updated_at"> 
   max_adr_multiplier: 2.5,
   news_blackout_enabled: false,
   news_blackout_minutes: 60,
+  scan_sessions: ["london", "new_york"],
 };
 
 export async function getAgentSettings(): Promise<AgentSettings> {
@@ -148,7 +149,7 @@ export async function getAgentSettings(): Promise<AgentSettings> {
       min_risk_reward, max_risk_per_trade_pct, allowed_pairs, allowed_timeframes,
       telegram_chat_id, cooldown_after_losses, cooldown_hours,
       volatility_gate_enabled, max_adr_multiplier,
-      news_blackout_enabled, news_blackout_minutes
+      news_blackout_enabled, news_blackout_minutes, scan_sessions
     ) VALUES (
       ${DEFAULT_SETTINGS.agent_mode}, ${DEFAULT_SETTINGS.kill_switch},
       ${DEFAULT_SETTINGS.max_trades_per_day}, ${DEFAULT_SETTINGS.min_confidence_score},
@@ -157,7 +158,8 @@ export async function getAgentSettings(): Promise<AgentSettings> {
       ${DEFAULT_SETTINGS.telegram_chat_id},
       ${DEFAULT_SETTINGS.cooldown_after_losses}, ${DEFAULT_SETTINGS.cooldown_hours},
       ${DEFAULT_SETTINGS.volatility_gate_enabled}, ${DEFAULT_SETTINGS.max_adr_multiplier},
-      ${DEFAULT_SETTINGS.news_blackout_enabled}, ${DEFAULT_SETTINGS.news_blackout_minutes}
+      ${DEFAULT_SETTINGS.news_blackout_enabled}, ${DEFAULT_SETTINGS.news_blackout_minutes},
+      ${DEFAULT_SETTINGS.scan_sessions}
     )
     RETURNING *
   `;
@@ -183,6 +185,7 @@ export async function updateAgentSettings(patch: NewAgentSettings): Promise<Agen
       max_adr_multiplier      = ${patch.max_adr_multiplier      ?? current.max_adr_multiplier},
       news_blackout_enabled   = ${patch.news_blackout_enabled   ?? current.news_blackout_enabled},
       news_blackout_minutes   = ${patch.news_blackout_minutes   ?? current.news_blackout_minutes},
+      scan_sessions           = ${patch.scan_sessions           ?? current.scan_sessions},
       updated_at              = now()
     WHERE id = ${current.id}
     RETURNING *

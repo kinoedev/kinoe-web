@@ -677,6 +677,58 @@ export default function AgentPage() {
               </div>
             </Section>
 
+            {/* Scan Schedule */}
+            <Section title="Scan Schedule">
+              <div className="space-y-3">
+                <div className="text-[10px] text-white/30 leading-relaxed">
+                  H4 candles close every 4 hours. Choose which sessions the agent should scan.
+                  Manual scans always run regardless of this setting.
+                </div>
+
+                {(["asian", "london", "new_york"] as const).map((key) => {
+                  const labels: Record<string, string> = {
+                    asian: "Asian  ·  00:00 & 04:00 UTC",
+                    london: "London  ·  08:00 & 12:00 UTC",
+                    new_york: "New York  ·  12:00, 16:00 & 20:00 UTC",
+                  };
+                  const current = d.scan_sessions ?? settings.scan_sessions ?? ["london", "new_york"];
+                  const on = current.includes(key);
+                  return (
+                    <div key={key} className="flex items-center justify-between">
+                      <div className="text-xs text-white/70">{labels[key]}</div>
+                      <button
+                        onClick={() => {
+                          const next = on
+                            ? current.filter((s) => s !== key)
+                            : [...current, key];
+                          setDraft((d) => ({ ...d, scan_sessions: next }));
+                        }}
+                        className={[
+                          "relative inline-flex h-6 w-11 items-center rounded-full border transition-colors",
+                          on ? "bg-purple-500/70 border-purple-500/50" : "bg-white/10 border-white/20",
+                        ].join(" ")}
+                      >
+                        <span className={[
+                          "inline-block h-4 w-4 rounded-full bg-white shadow transition-transform",
+                          on ? "translate-x-6" : "translate-x-1",
+                        ].join(" ")} />
+                      </button>
+                    </div>
+                  );
+                })}
+
+                <div className="text-[10px] text-white/20 pt-1">
+                  {(() => {
+                    const active = d.scan_sessions ?? settings.scan_sessions ?? [];
+                    if (active.length === 0) return "No sessions selected — agent will never auto-scan.";
+                    const count = active.includes("new_york") && active.includes("london")
+                      ? 5 : active.includes("new_york") ? 3 : active.includes("london") ? 2 : 2;
+                    return `~${count} scans per trading day`;
+                  })()}
+                </div>
+              </div>
+            </Section>
+
             {/* Telegram */}
             <Section title="Telegram Alerts">
               <div className="space-y-3">
