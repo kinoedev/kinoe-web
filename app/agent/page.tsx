@@ -91,7 +91,14 @@ export default function AgentPage() {
     const sData = await sRes.json();
     const rData = await rRes.json();
     const cData = await cRes.json();
-    if (sData.ok) { setSettings(sData.settings); setDraft(sData.settings); }
+    if (sData.ok) {
+      // Neon returns NUMERIC columns as strings — coerce to numbers
+      const s = sData.settings;
+      s.min_risk_reward = Number(s.min_risk_reward);
+      s.max_risk_per_trade_pct = Number(s.max_risk_per_trade_pct);
+      setSettings(s);
+      setDraft(s);
+    }
     if (rData.ok) setRuns(rData.runs ?? []);
     if (cData.ok) setCandidates(cData.candidates ?? []);
   }, []);
