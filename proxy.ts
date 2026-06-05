@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { AUTH_COOKIE, verify } from "@/lib/auth";
 
-const PUBLIC_PATHS = ["/login", "/api/auth/login", "/api/agent/run", "/api/agent/close-check"];
+const PUBLIC_PATHS = ["/login", "/api/auth/login", "/api/agent/run", "/api/agent/close-check", "/api/agent/telegram/webhook"];
 
 export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
