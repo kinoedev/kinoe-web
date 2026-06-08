@@ -66,6 +66,20 @@ export async function answerCallbackQuery(
   });
 }
 
+export async function deleteWebhook(token: string): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const res = await fetch(botUrl(token, "deleteWebhook"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    const data = await res.json() as { ok: boolean; description?: string };
+    return { ok: data.ok, error: data.description };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "fetch failed" };
+  }
+}
+
 export async function registerWebhook(token: string, webhookUrl: string): Promise<{ ok: boolean; error?: string }> {
   try {
     const res = await fetch(botUrl(token, "setWebhook"), {

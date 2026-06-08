@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { registerWebhook } from "@/lib/telegram";
+import { registerWebhook, deleteWebhook } from "@/lib/telegram";
 
 export async function POST(req: NextRequest) {
   const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -7,11 +7,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "TELEGRAM_BOT_TOKEN not set." }, { status: 400 });
   }
 
-  // Derive the site URL from the request origin header or NEXTAUTH_URL
   // Hard-code the webhook URL for kinoe.dev
   const webhookUrl = "https://kinoe.dev/api/agent/telegram/webhook";
 
-  console.log(`[Telegram Setup] Registering webhook: ${webhookUrl}`);
+  console.log(`[Telegram Setup] Deleting old webhook...`);
+  await deleteWebhook(token);
+
+  console.log(`[Telegram Setup] Registering new webhook: ${webhookUrl}`);
   const result = await registerWebhook(token, webhookUrl);
   console.log(`[Telegram Setup] Result:`, result);
 
