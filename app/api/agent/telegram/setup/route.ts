@@ -8,7 +8,7 @@ export async function POST(req: NextRequest) {
   }
 
   // Derive the site URL from the request origin header or NEXTAUTH_URL
-  const origin =
+  let origin =
     req.headers.get("origin") ??
     req.headers.get("x-forwarded-host") ??
     process.env.NEXTAUTH_URL ??
@@ -19,6 +19,13 @@ export async function POST(req: NextRequest) {
       ok: false,
       error: "Cannot determine site URL. Set VERCEL_URL or NEXTAUTH_URL in environment variables.",
     }, { status: 400 });
+  }
+
+  // Strip www prefix if present
+  if (origin.includes("//www.")) {
+    origin = origin.replace("//www.", "//");
+  } else if (origin.startsWith("www.")) {
+    origin = origin.replace("www.", "");
   }
 
   const webhookUrl = origin.startsWith("http")
