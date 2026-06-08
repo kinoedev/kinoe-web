@@ -8,29 +8,8 @@ export async function POST(req: NextRequest) {
   }
 
   // Derive the site URL from the request origin header or NEXTAUTH_URL
-  let origin =
-    req.headers.get("origin") ??
-    req.headers.get("x-forwarded-host") ??
-    process.env.NEXTAUTH_URL ??
-    process.env.VERCEL_URL;
-
-  if (!origin) {
-    return NextResponse.json({
-      ok: false,
-      error: "Cannot determine site URL. Set VERCEL_URL or NEXTAUTH_URL in environment variables.",
-    }, { status: 400 });
-  }
-
-  // Strip www prefix if present
-  if (origin.includes("//www.")) {
-    origin = origin.replace("//www.", "//");
-  } else if (origin.startsWith("www.")) {
-    origin = origin.replace("www.", "");
-  }
-
-  const webhookUrl = origin.startsWith("http")
-    ? `${origin}/api/agent/telegram/webhook`
-    : `https://${origin}/api/agent/telegram/webhook`;
+  // Hard-code the webhook URL for kinoe.dev
+  const webhookUrl = "https://kinoe.dev/api/agent/telegram/webhook";
 
   console.log(`[Telegram Setup] Registering webhook: ${webhookUrl}`);
   const result = await registerWebhook(token, webhookUrl);
