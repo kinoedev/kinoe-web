@@ -29,16 +29,31 @@ export async function POST(req: NextRequest) {
     const update = (await req.json()) as TelegramUpdate;
     const cq = update.callback_query;
 
-    if (!cq?.data) return NextResponse.json({ ok: true });
+    console.log(`[Telegram Webhook] Received callback:`, { id: cq?.id, data: cq?.data });
+
+    if (!cq?.data) {
+      console.log(`[Telegram Webhook] No callback data`);
+      return NextResponse.json({ ok: true });
+    }
 
     const token = process.env.TELEGRAM_BOT_TOKEN;
     if (token) await answerCallbackQuery(token, cq.id, "Processing...");
 
     const [action, candidateId] = cq.data.split(":");
-    if (!action || !candidateId) return NextResponse.json({ ok: true });
+    console.log(`[Telegram Webhook] Action: ${action}, CandidateId: ${candidateId}`);
+
+    if (!action || !candidateId) {
+      console.log(`[Telegram Webhook] Missing action or candidateId`);
+      return NextResponse.json({ ok: true });
+    }
 
     const candidate = await getAgentCandidate(candidateId);
-    if (!candidate) return NextResponse.json({ ok: true });
+    console.log(`[Telegram Webhook] Candidate found:`, { id: candidate?.id, decision: candidate?.decision });
+
+    if (!candidate) {
+      console.log(`[Telegram Webhook] Candidate not found for id: ${candidateId}`);
+      return NextResponse.json({ ok: true });
+    }
 
     if (candidate.decision !== "PENDING") {
       if (token) await answerCallbackQuery(token, cq.id, `Already ${candidate.decision}`);
