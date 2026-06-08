@@ -25,11 +25,14 @@ export async function POST(req: NextRequest) {
     ? `${origin}/api/agent/telegram/webhook`
     : `https://${origin}/api/agent/telegram/webhook`;
 
+  console.log(`[Telegram Setup] Registering webhook: ${webhookUrl}`);
   const result = await registerWebhook(token, webhookUrl);
+  console.log(`[Telegram Setup] Result:`, result);
 
   return NextResponse.json({
     ok: result.ok,
     webhookUrl,
     error: result.error,
-  }, { status: result.ok ? 200 : 500 });
+    message: result.ok ? "Webhook registered successfully" : "Webhook registration failed",
+  }, { status: result.ok ? 200 : 400 });
 }
