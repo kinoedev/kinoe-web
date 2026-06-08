@@ -7,8 +7,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "TELEGRAM_BOT_TOKEN not set." }, { status: 400 });
   }
 
-  // Hard-code the webhook URL for kinoe.dev
-  const webhookUrl = "https://kinoe.dev/api/agent/telegram/webhook";
+  // Hard-code the webhook URL for www.kinoe.dev (the actual domain)
+  const webhookUrl = "https://www.kinoe.dev/api/agent/telegram/webhook";
 
   console.log(`[Telegram Setup] Deleting old webhook...`);
   await deleteWebhook(token);
