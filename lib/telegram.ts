@@ -90,6 +90,7 @@ export function buildCandidateAlert(candidate: AgentCandidate, positionSizeText?
   const rr = candidate.risk_reward != null ? Number(candidate.risk_reward).toFixed(1) : "?";
   const setup = candidate.setup_type ?? "Unknown setup";
   const status = candidate.trade_status ?? "?";
+  const entry = candidate.entry_price ? Number(candidate.entry_price).toFixed(5) : "?";
   const sl = candidate.stop_loss ? Number(candidate.stop_loss).toFixed(5) : "?";
   const tp = candidate.take_profit ? Number(candidate.take_profit).toFixed(5) : "?";
 
@@ -119,6 +120,7 @@ export function buildCandidateAlert(candidate: AgentCandidate, positionSizeText?
     `<b>${pair} ${dir}</b>\n` +
     `Score: <b>${score}</b> | RR: ${rr}:1${riskPips ? ` | Risk: ${riskPips} pips` : ""}\n` +
     `Status: ${status} | Setup: ${setup}\n\n` +
+    `<b>Entry:</b> <code>${entry}</code>\n` +
     `<b>SL:</b> <code>${sl}</code>\n` +
     `<b>TP:</b> <code>${tp}</code>\n` +
     (positionSizeText ? `<b>Size:</b> ${positionSizeText}\n` : "") +
