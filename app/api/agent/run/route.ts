@@ -123,12 +123,8 @@ export async function POST(req: NextRequest) {
       if (rr < Number(settings.min_risk_reward)) continue;
       if (!settings.allowed_timeframes.includes(analysis.timeframe)) continue;
 
-      const direction =
-        analysis.executionTimeframeBias === "BULLISH" ? "LONG"
-        : analysis.executionTimeframeBias === "BEARISH" ? "SHORT"
-        : null;
-
       const plan = analysis.potentialTradePlan;
+      const direction = plan?.direction ?? null;
 
       // Derive entry price from the plan: entry = (tp + sl × rr) / (1 + rr)
       const derivedEntry = plan
