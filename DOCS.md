@@ -12,6 +12,7 @@ A private trading platform for futures price action. Scans MNQ, MES, MGC and MCL
 | **Charts** | Full-screen TradingView Advanced Chart with a futures quick switcher. Accepts `?symbol=CME_MINI:MNQ1!` deep links from the scanner. |
 | **Scanner** | Futures key-level zone scanner. Pulls CME data from Databento (cached), builds the weekly level set and 3–5 rectangle zones per contract, and ranks contracts by how close price is to a zone. |
 | **Backtest** | Walk-forward backtest of the 1H / 15m / 5m zone strategy (setups A and B) on cached CME 1-minute data. Win rate, expectancy, drawdown, equity curve, and a breakdown by setup, session, direction and contract. |
+| **Breakout Lab** | Reads every 15m close through a zone — ICT liquidity (PDH/PDL, Asia/London highs & lows, equal highs/lows), displacement + fair value gap, relative volume, stochastic divergence, 1H structure — labels it Strong / Weak / Likely trap, and measures on cached history which of those actually predict follow-through. The Scanner shows the latest break's label on each contract. |
 | **Journal** | TradeZella-style journal: Tradovate imports (Performance PDF/CSV, Orders CSV), dashboard (stats, Kinoe score, cumulative P&L, P&L calendar), prop-firm tracker per account (balance, EOD-trailing drawdown floor, daily loss limit, profit target), reports (symbol, hour, weekday, hold time, playbook, mistakes, account), playbooks with rules checklists compared against backtests, daily notebook, per-trade review (playbook, rules followed, stop → R, rating, mistake/emotion tags) and AI grading. `/analytics` redirects to Journal → Reports. |
 | **Market** | Session timeline, TradingView futures quotes, USD economic calendar, futures news. |
 | **Settings** | Databento status and credit used, AI spend, journal stats, env var health check. |
@@ -234,6 +235,7 @@ The grader evaluates: process quality, risk management, thesis clarity, emotiona
 | POST | `/api/futures/scan` | Download new bars (cached) and recompute zones. Body `{ symbols?: string[], confirm?: boolean }`. Returns `409 { needsConfirm, estimate }` when the estimate is over `DATABENTO_MAX_COST_USD`. |
 | POST | `/api/backtest/data` | Download/caches the history a backtest needs. Body `{ symbol, days, confirm? }`. `409 needsConfirm` above the credit limit. |
 | POST | `/api/backtest/run` | Run the backtest on cached bars and save it. Body `{ symbol, days, params? }`. |
+| POST | `/api/breakouts/study` | Breakout Lab rows for one contract on cached history. Body `{ symbol, days }` (download history via `/api/backtest/data` first). |
 | GET/POST | `/api/journal/accounts` | List / create trading accounts. `PATCH /api/journal/accounts/[id]` updates one. |
 | GET/POST/DELETE | `/api/journal/import` | Recent imports · import `{ accountId, files: [{ name, text or base64 }], dryRun? }` · `?id=` undo |
 | GET | `/api/journal/trades` | Closed trades `?account=&from=&to=` + accounts, playbooks, note days |
@@ -275,6 +277,25 @@ R is measured against the risk at the actual fill. `stats.ts` computes win rate,
 **Data:** the first run per contract downloads 1-minute history for the window (+10 days warm-up) and 1-hour history (+160 days), priced first with `metadata.get_cost` and gated by `DATABENTO_MAX_COST_USD`. Runs themselves read only the cache.
 
 ---
+
+## Breakout Quality (`lib/indicators/breakout.ts`)
+
+Read at the close of a 15m candle that closes through a zone (no look-ahead):
+
+| Feature | Definition | Starting weight |
+|---|---|---|
+| Displacement | body ≥ 1 ATR(15m), in the break direction, closing in the outer 30% of its range | +15 (small body < 0.5 ATR: −10) |
+| Fair value gap | 3-candle gap: high two bars back < break bar low (longs) | +10 |
+| Relative volume | break bar volume ÷ same 15m slot's average over up to 10 prior sessions | ≥ 1.5×: +15 · < 0.8×: −10 |
+| Swept opposite liquidity first | in the 8 bars before, a wick through sell-side liquidity that closed back above (longs) | +10 |
+| Only wicked liquidity | the break bar wicks through resting buy-side liquidity but closes below it (longs) | −25 and labelled trap |
+| Liquidity ahead | untaken buy-side liquidity within 3 ATR above (longs) | +5 |
+| Stochastic divergence | new high vs the last 15m swing high, %K(14,3) ≥ 5 lower | −15 |
+| 1H structure | last two 1H swing highs and lows both rising (longs) / falling | with +10 · against −10 |
+
+Score starts at 50: **Strong ≥ 65**, **Likely trap** < 40 or a liquidity-wick break, otherwise **Weak**. Liquidity pools: previous trading day high/low, Asia (18:00–23:00 CT) and London (01:00–04:00 CT) ranges, and equal highs/lows (two 15m swings within 0.1 ATR) — only those not yet traded through.
+
+**Breakout Lab** (`lib/backtest/breakoutStudy.ts`, `lib/indicators/breakoutStats.ts`): walk-forward over cached bars with zones rebuilt each session. Outcome: *followed through* = 1 ATR beyond the break close within 8 bars before a 15m close back through the zone's far side; *failed* = the close-back came first. Each feature shows follow-through with vs without it; it's marked as mattering only with ≥ 30 breaks on each side and |z| ≥ 2.6 (strict, because a dozen features are tested together). The weights above are starting points — change them in `scoreBreak()` to match what the Lab shows on real data.
 
 ## Journal import (`lib/journal/`)
 

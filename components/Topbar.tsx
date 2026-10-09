@@ -9,6 +9,7 @@ const PAGE_META: Record<string, { title: string; sub: string }> = {
   "/charts":    { title: "Charts",    sub: "Advanced Charting" },
   "/scanner":   { title: "Scanner",   sub: "Futures Key-Level Zones" },
   "/backtest":  { title: "Backtest",  sub: "1H · 15m · 5m Zone Strategy" },
+  "/breakouts": { title: "Breakout Lab", sub: "Strong vs False Breakouts" },
   "/journal/trades":    { title: "Journal",   sub: "All Trades" },
   "/journal/reports":   { title: "Journal",   sub: "Reports" },
   "/journal/playbooks": { title: "Journal",   sub: "Playbooks" },

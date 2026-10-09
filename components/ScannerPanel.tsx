@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import type { ZoneAnalysis } from "@/lib/indicators/zones";
+import type { ScannerResult } from "@/lib/futures/scanner";
 import { formatPrice, getSymbol } from "@/lib/futures/symbols";
 
 const ORDER = { IN_ZONE: 0, APPROACHING: 1, CLEAR: 2 } as const;
@@ -15,7 +15,7 @@ const TEXT = { IN_ZONE: "In zone", APPROACHING: "Approaching", CLEAR: "Clear" } 
 
 /** Compact scanner summary for the Terminal: which contract is nearest a zone. Reads saved scans only. */
 export default function ScannerPanel() {
-  const [results, setResults] = useState<ZoneAnalysis[] | null>(null);
+  const [results, setResults] = useState<ScannerResult[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -24,7 +24,7 @@ export default function ScannerPanel() {
       .then((d) => {
         if (!d.ok) throw new Error(d.error ?? "Failed to load");
         setResults(
-          (d.results as ZoneAnalysis[]).sort(
+          (d.results as ScannerResult[]).sort(
             (a, b) => ORDER[a.proximity.status] - ORDER[b.proximity.status] || a.proximity.distanceAtr - b.proximity.distanceAtr
           )
         );
@@ -58,6 +58,14 @@ export default function ScannerPanel() {
                 <span className="font-mono text-xs text-white/70">{formatPrice(a.lastPrice, tick)}</span>
                 <span className={`rounded-full border px-2 py-0.5 text-[10px] ${STYLE[p.status]}`}>{TEXT[p.status]}</span>
               </div>
+              {a.breakout ? (
+                <div
+                  className={`mt-1.5 text-[11px] ${a.breakout.quality === "STRONG" ? "text-emerald-200" : a.breakout.quality === "TRAP" ? "text-red-200" : "text-white/60"}`}
+                >
+                  {a.breakout.quality === "STRONG" ? "Strong break" : a.breakout.quality === "TRAP" ? "Likely trap" : "Weak break"} {a.breakout.dir === "LONG" ? "↑" : "↓"}{" "}
+                  {a.breakout.score} · {a.breakout.reasons.slice(0, 2).map((r) => r.text).join(", ")}
+                </div>
+              ) : null}
               {p.zone ? (
                 <div className="mt-1.5 text-[11px] leading-4 text-white/50">
                   {p.status === "IN_ZONE" ? "Inside " : `${formatPrice(p.distance, tick)} pts from `}

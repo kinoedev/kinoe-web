@@ -4,11 +4,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Sidebar from "@/components/Sidebar";
 import Topbar from "@/components/Topbar";
 import type { ZoneAnalysis, Zone } from "@/lib/indicators/zones";
+import type { ScannerResult } from "@/lib/futures/scanner";
 import { formatPrice, getSymbol } from "@/lib/futures/symbols";
 
 type LoadResponse = {
   ok: boolean;
-  results?: ZoneAnalysis[];
+  results?: ScannerResult[];
   savedAt?: string | null;
   spend?: { total: number; last30d: number; pulls: number };
   limit?: number;
@@ -20,7 +21,7 @@ type ScanResponse =
       ok: true;
       scannedAt: string;
       dataThrough: string;
-      results: ZoneAnalysis[];
+      results: ScannerResult[];
       errors: { symbol: string; error: string }[];
       spend: { thisScan: number; rowsDownloaded: number; total: number; last30d: number };
     }
@@ -124,7 +125,36 @@ function ZoneRow({ z, tick }: { z: Zone; tick: number }) {
   );
 }
 
-function SymbolCard({ a }: { a: ZoneAnalysis }) {
+const BREAK_STYLE = {
+  STRONG: "border-emerald-400/40 bg-emerald-500/10 text-emerald-100",
+  WEAK: "border-white/15 bg-white/5 text-white/70",
+  TRAP: "border-red-400/40 bg-red-500/10 text-red-100",
+} as const;
+const BREAK_TEXT = { STRONG: "Strong break", WEAK: "Weak break", TRAP: "Likely trap" } as const;
+
+function BreakTag({ b, tick }: { b: NonNullable<ScannerResult["breakout"]>; tick: number }) {
+  return (
+    <div className={`mt-3 rounded-xl border px-3 py-2 text-xs ${BREAK_STYLE[b.quality]}`}>
+      <div className="flex flex-wrap items-center gap-x-2">
+        <span className="font-medium">
+          {BREAK_TEXT[b.quality]} {b.dir === "LONG" ? "↑" : "↓"} {b.score}
+        </span>
+        <span className="opacity-70">
+          15m close {formatPrice(b.price, tick)} through {b.zoneLabel.split(" — ")[0]} · {ct(b.ts)}
+        </span>
+      </div>
+      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px]">
+        {b.reasons.map((r) => (
+          <span key={r.text} className={r.good ? "text-emerald-200/90" : "text-red-200/90"}>
+            {r.good ? "+" : "−"} {r.text}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SymbolCard({ a }: { a: ScannerResult }) {
   const sym = getSymbol(a.symbol);
   const tick = sym?.tick ?? 0.01;
   const [showSet, setShowSet] = useState(false);
@@ -165,6 +195,8 @@ function SymbolCard({ a }: { a: ZoneAnalysis }) {
           </span>
         </div>
       </div>
+
+      {a.breakout ? <BreakTag b={a.breakout} tick={tick} /> : null}
 
       {p.zone ? (
         <div className="mt-3 text-xs text-white/60">
@@ -249,7 +281,7 @@ function SymbolCard({ a }: { a: ZoneAnalysis }) {
 }
 
 export default function ScannerPage() {
-  const [results, setResults] = useState<ZoneAnalysis[]>([]);
+  const [results, setResults] = useState<ScannerResult[]>([]);
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [spend, setSpend] = useState<{ total: number; last30d: number } | null>(null);
   const [loading, setLoading] = useState(true);
