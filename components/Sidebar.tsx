@@ -37,6 +37,7 @@ export default function Sidebar() {
     { label: "Charts", href: "/charts" },
     { label: "Scanner", href: "/scanner" },
     { label: "Backtest", href: "/backtest" },
+    { label: "Breakout Lab", href: "/breakouts" },
     { label: "Journal", href: "/journal" },
     { label: "Market", href: "/market" },
     { label: "Settings", href: "/settings" },
