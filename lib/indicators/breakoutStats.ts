@@ -1,5 +1,5 @@
 /** Aggregate Breakout Lab rows: which features actually separate follow-through from failure. */
-import type { BreakFeatures, Quality } from "./breakout";
+import type { BreakFeatures, FailureFeatures, Quality } from "./breakout";
 
 export type StudyRow = {
   symbol: string;
@@ -187,4 +187,81 @@ export function explainStudy(s: ReturnType<typeof studySummary>): StudyExplanati
       ? "Fewer than 300 breaks — treat every conclusion as provisional and re-run with more days."
       : "These are follow-through rates, not profits: a rule that helps here still needs a stop, a target and the backtester to prove it pays.";
   return { headline, label, helps, warns, unclear, caveat };
+}
+
+// ── Failure tests ───────────────────────────────────────────────────────────
+
+export type FailureRow = {
+  symbol: string;
+  ts: number;
+  dir: "LONG" | "SHORT";
+  level: string;
+  features: FailureFeatures;
+  followed: boolean;
+  failed: boolean;
+  mfeAtr: number;
+  maeAtr: number;
+};
+
+const FAILURE_FEATURES: [string, (f: FailureFeatures) => boolean][] = [
+  ["RSI divergence", (f) => f.rsiDivergence],
+  ["Strong rejection close", (f) => f.strongClose],
+  ["Volume ≥ 1.5× normal", (f) => (f.relVol ?? 0) >= 1.5],
+  ["With 1H trend", (f) => f.trend === "WITH"],
+  ["Against 1H trend", (f) => f.trend === "AGAINST"],
+  ["RTH open (8:30–11 CT)", (f) => f.session === "RTH_OPEN"],
+  ["Evening (5pm–2am CT)", (f) => f.session === "EVENING"],
+];
+
+function fbucket(label: string, rows: FailureRow[]): Bucket {
+  const n = rows.length;
+  const avg = (f: (r: FailureRow) => number) => (n ? rows.reduce((s, r) => s + f(r), 0) / n : 0);
+  return {
+    label,
+    n,
+    follow: n ? rows.filter((r) => r.followed).length / n : 0,
+    fail: n ? rows.filter((r) => r.failed).length / n : 0,
+    avgMfe: avg((r) => r.mfeAtr),
+    avgMae: avg((r) => r.maeAtr),
+  };
+}
+
+export function failureSummary(rows: FailureRow[]) {
+  const overall = fbucket("All failure tests", rows);
+  const features: FeatureLift[] = FAILURE_FEATURES.map(([name, test]) => {
+    const w = fbucket(name, rows.filter((r) => test(r.features)));
+    const wo = fbucket(`not ${name}`, rows.filter((r) => !test(r.features)));
+    return { feature: name, with: w, without: wo, lift: w.n && wo.n ? w.follow - wo.follow : 0 };
+  });
+  const both = fbucket("RSI divergence + strong close", rows.filter((r) => r.features.rsiDivergence && r.features.strongClose));
+  return { overall, features, both };
+}
+
+/** Plain-English read of the failure-test results. */
+export function explainFailures(s: ReturnType<typeof failureSummary>, breakBase: number | null): string[] {
+  const out: string[] = [];
+  const o = s.overall;
+  if (o.n < 30) return [`Only ${o.n} failure tests — too few to judge. Run more days.`];
+  out.push(
+    `${o.n} failure tests (wick through a zone, close back inside): the fade worked ${p0(o.follow)} of the time, the stop (a close past the wick) was hit ${p0(o.fail)}.` +
+      (breakBase !== null ? ` For comparison, breakouts kept going ${p0(breakBase)}.` : "")
+  );
+  const div = s.features.find((f) => f.feature === "RSI divergence");
+  if (div) {
+    const sig = significant(div.with, div.without);
+    out.push(
+      div.with.n < 30
+        ? `RSI divergence showed up on only ${div.with.n} of them — not enough to say whether the course's confirmation helps on your contracts.`
+        : sig
+          ? div.lift > 0
+            ? `The course's confirmation works here: with RSI divergence the fade worked ${p0(div.with.follow)} vs ${p0(div.without.follow)} without. Make divergence required for setup C.`
+            : `RSI divergence made it worse here (${p0(div.with.follow)} vs ${p0(div.without.follow)}) — don't require it.`
+          : `RSI divergence: ${p0(div.with.follow)} with vs ${p0(div.without.follow)} without — within noise, so it isn't adding an edge on your contracts yet.`
+    );
+  }
+  for (const f of s.features) {
+    if (f.feature === "RSI divergence" || !significant(f.with, f.without)) continue;
+    out.push(`${f.feature}: ${p0(f.with.follow)} with vs ${p0(f.without.follow)} without — ${f.lift > 0 ? "a real plus" : "a real minus"} for failure-test fades.`);
+  }
+  return out;
 }

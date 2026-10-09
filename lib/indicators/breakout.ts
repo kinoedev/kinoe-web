@@ -54,6 +54,8 @@ export type BreakoutContext = {
   hourly: Bar[];
   atr: number[];
   stochK: number[];
+  /** Wilder RSI(14) on closes. */
+  rsi: number[];
   relVol: (number | null)[];
   day: string[];
   minutes: number[];
@@ -97,6 +99,24 @@ export function prepareContext(bars15: Bar[], hourly: Bar[]): BreakoutContext {
     return s.reduce((x, y) => x + y, 0) / s.length;
   });
 
+  // Wilder RSI(14)
+  const rsi: number[] = new Array(n).fill(50);
+  let ag = 0;
+  let al = 0;
+  for (let i = 1; i < n; i++) {
+    const ch = bars[i].close - bars[i - 1].close;
+    const g = Math.max(0, ch);
+    const l = Math.max(0, -ch);
+    if (i <= 14) {
+      ag += g / 14;
+      al += l / 14;
+    } else {
+      ag = (ag * 13 + g) / 14;
+      al = (al * 13 + l) / 14;
+    }
+    rsi[i] = al === 0 ? 100 : 100 - 100 / (1 + ag / al);
+  }
+
   // Relative volume vs the same 15m slot over up to 10 prior sessions
   const day = bars.map((b) => tradingDayFast(b.ts));
   const minutes = bars.map((b) => chicagoClock(b.ts).minutes);
@@ -110,7 +130,7 @@ export function prepareContext(bars15: Bar[], hourly: Bar[]): BreakoutContext {
     return avg && avg > 0 ? b.volume / avg : null;
   });
 
-  return { bars, hourly: [...hourly].sort((x, y) => x.ts - y.ts), atr, stochK, relVol, day, minutes };
+  return { bars, hourly: [...hourly].sort((x, y) => x.ts - y.ts), atr, stochK, rsi, relVol, day, minutes };
 }
 
 // ── Liquidity ───────────────────────────────────────────────────────────────
@@ -333,6 +353,62 @@ export function outcome(ctx: BreakoutContext, i: number, dir: Dir, zoneTop: numb
     if (mfe >= A) return { followed: true, failed: false, mfeAtr: mfe / A, maeAtr: mae / A };
     const backThrough = dir === "LONG" ? b.close < zoneBottom : b.close > zoneTop;
     if (backThrough) return { followed: false, failed: true, mfeAtr: mfe / A, maeAtr: mae / A };
+  }
+  return { followed: false, failed: false, mfeAtr: mfe / A, maeAtr: mae / A };
+}
+
+// ── Failure tests (false breakouts) — the Trading Strategies course setup ─────
+
+export type FailureFeatures = {
+  /** Price beyond the last 15m swing but RSI(14) isn't (bearish: higher high, lower RSI high). */
+  rsiDivergence: boolean;
+  /** The failure candle closes in the outer 40% of its range, back toward the level's inside. */
+  strongClose: boolean;
+  relVol: number | null;
+  trend: "WITH" | "AGAINST" | "MIXED";
+  session: BreakFeatures["session"];
+};
+
+/** dir = trade direction: SHORT after a false break up through resistance, LONG after a false break down. */
+export function readFailure(ctx: BreakoutContext, i: number, dir: Dir): FailureFeatures {
+  const { bars, rsi, relVol, minutes } = ctx;
+  const b = bars[i];
+  const short = dir === "SHORT";
+  const range = b.high - b.low || 1e-9;
+  const strongClose = short ? (b.high - b.close) / range >= 0.6 : (b.close - b.low) / range >= 0.6;
+  let rsiDivergence = false;
+  for (let k = i - 3; k >= Math.max(2, i - 30); k--) {
+    const isSwing = short
+      ? bars[k].high >= bars[k - 1].high && bars[k].high >= bars[k - 2].high && bars[k].high >= bars[k + 1].high && bars[k].high >= bars[k + 2].high
+      : bars[k].low <= bars[k - 1].low && bars[k].low <= bars[k - 2].low && bars[k].low <= bars[k + 1].low && bars[k].low <= bars[k + 2].low;
+    if (!isSwing) continue;
+    rsiDivergence = short ? b.high > bars[k].high && rsi[i] < rsi[k] : b.low < bars[k].low && rsi[i] > rsi[k];
+    break;
+  }
+  const t = trendAt(ctx.hourly, b.ts + M15);
+  const trend: FailureFeatures["trend"] = t === "MIXED" ? "MIXED" : (t === "UP") === !short ? "WITH" : "AGAINST";
+  return { rsiDivergence, strongClose, relVol: relVol[i], trend, session: sessionOf(minutes[i]) };
+}
+
+/**
+ * Worked: price moves 1 ATR in the fade direction within 8 bars before any 15m close beyond the
+ * failure wick (the stop). Failed: that close beyond the wick comes first.
+ */
+export function failureOutcome(ctx: BreakoutContext, i: number, dir: Dir, horizon = 8): BreakOutcome {
+  const { bars, atr } = ctx;
+  const A = atr[i] || 1;
+  const entry = bars[i].close;
+  const stop = dir === "SHORT" ? bars[i].high : bars[i].low;
+  let mfe = 0;
+  let mae = 0;
+  for (let k = i + 1; k < Math.min(bars.length, i + 1 + horizon); k++) {
+    const b = bars[k];
+    const fav = dir === "LONG" ? b.high - entry : entry - b.low;
+    const adv = dir === "LONG" ? entry - b.low : b.high - entry;
+    mfe = Math.max(mfe, fav);
+    mae = Math.max(mae, adv);
+    if (mfe >= A) return { followed: true, failed: false, mfeAtr: mfe / A, maeAtr: mae / A };
+    if (dir === "SHORT" ? b.close > stop : b.close < stop) return { followed: false, failed: true, mfeAtr: mfe / A, maeAtr: mae / A };
   }
   return { followed: false, failed: false, mfeAtr: mfe / A, maeAtr: mae / A };
 }

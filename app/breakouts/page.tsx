@@ -6,7 +6,7 @@ import Sidebar from "@/components/Sidebar";
 import Topbar from "@/components/Topbar";
 import { FUTURES_SYMBOLS } from "@/lib/futures/symbols";
 import { scoreBreak, type Quality } from "@/lib/indicators/breakout";
-import { explainStudy, significant, studySummary, type Bucket, type StudyRow } from "@/lib/indicators/breakoutStats";
+import { explainFailures, explainStudy, failureSummary, significant, studySummary, type Bucket, type FailureRow, type StudyRow } from "@/lib/indicators/breakoutStats";
 
 const QUALITY_STYLE: Record<Quality, string> = {
   STRONG: "border-emerald-400/40 bg-emerald-500/10 text-emerald-100",
@@ -43,6 +43,7 @@ export default function BreakoutLabPage() {
   const [symbols, setSymbols] = useState<string[]>(FUTURES_SYMBOLS.map((s) => s.root));
   const [days, setDays] = useState(60);
   const [rows, setRows] = useState<StudyRow[] | null>(null);
+  const [fails, setFails] = useState<FailureRow[] | null>(null);
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -53,6 +54,7 @@ export default function BreakoutLabPage() {
     setError(null);
     setConfirm(null);
     const all: StudyRow[] = [];
+    const allFails: FailureRow[] = [];
     try {
       for (const sym of symbols) {
         setProgress(`${sym}: checking history…`);
@@ -73,8 +75,10 @@ export default function BreakoutLabPage() {
         }).then(safeJson);
         if (!s.ok) throw new Error(s.error ?? `${sym}: study failed`);
         all.push(...s.rows);
+        allFails.push(...(s.failures ?? []));
       }
       setRows(all);
+      setFails(allFails);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Study failed");
     } finally {
@@ -87,6 +91,8 @@ export default function BreakoutLabPage() {
   const relabelled = useMemo(() => rows?.map((r) => ({ ...r, ...scoreBreak(r.features) })) ?? null, [rows]);
   const summary = useMemo(() => (relabelled ? studySummary(relabelled) : null), [relabelled]);
   const plain = useMemo(() => (summary ? explainStudy(summary) : null), [summary]);
+  const fsum = useMemo(() => (fails ? failureSummary(fails) : null), [fails]);
+  const fplain = useMemo(() => (fsum ? explainFailures(fsum, summary ? summary.overall.follow : null) : null), [fsum, summary]);
   const recent = useMemo(() => (relabelled ? [...relabelled].sort((a, b) => b.ts - a.ts).slice(0, 15) : []), [relabelled]);
 
   return (
@@ -190,6 +196,56 @@ export default function BreakoutLabPage() {
                     <div className="text-[11px] text-white/35">
                       Everything not listed above moved the result by less than chance would — it&apos;s noise on these contracts. Details below; the white tick on each bar is
                       the {pct(summary.overall.follow)} baseline.
+                    </div>
+                  </div>
+                ) : null}
+
+                {fsum && fplain ? (
+                  <div className="space-y-3 rounded-2xl border border-sky-500/25 bg-sky-950/20 p-5">
+                    <div className="text-[10px] uppercase tracking-widest text-sky-200/70">Failure tests — the course setup</div>
+                    {fplain.map((line) => (
+                      <p key={line} className="text-sm leading-6 text-white/80">
+                        {line}
+                      </p>
+                    ))}
+                    <div className="overflow-x-auto">
+                      <table className="w-full min-w-[480px] text-left text-xs">
+                        <thead className="text-[10px] uppercase tracking-wider text-white/40">
+                          <tr>
+                            <th className="px-3 py-1.5">Feature</th>
+                            <th className="px-3 py-1.5 text-right">Fade worked with</th>
+                            <th className="px-3 py-1.5 text-right">Without</th>
+                            <th className="px-3 py-1.5">Verdict</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {fsum.features.map((f) => {
+                            const sig = significant(f.with, f.without);
+                            return (
+                              <tr key={f.feature} className="border-t border-white/5 text-white/75">
+                                <td className="px-3 py-1.5">{f.feature}</td>
+                                <td className="px-3 py-1.5 text-right font-mono">
+                                  {f.with.n ? pct(f.with.follow) : "—"} <span className="text-white/30">({f.with.n})</span>
+                                </td>
+                                <td className="px-3 py-1.5 text-right font-mono">
+                                  {f.without.n ? pct(f.without.follow) : "—"} <span className="text-white/30">({f.without.n})</span>
+                                </td>
+                                <td className="px-3 py-1.5">
+                                  {sig ? (
+                                    <span className={f.lift > 0 ? "text-emerald-300" : "text-red-300"}>{f.lift > 0 ? "✓ helps" : "✓ hurts"}</span>
+                                  ) : (
+                                    <span className="text-white/35">{f.with.n < 30 ? "too few" : "noise"}</span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="text-[11px] text-white/40">
+                      Worked = price moved 1 ATR back toward value before a 15m candle closed past the wick (your stop). Divergence = RSI(14) failed to confirm the new
+                      high/low vs the last swing.
                     </div>
                   </div>
                 ) : null}

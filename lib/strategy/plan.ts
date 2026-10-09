@@ -4,7 +4,7 @@
  * Edit here; the Strategy page renders it.
  */
 
-export const PLAN_VERSION = "v1 · October 2026";
+export const PLAN_VERSION = "v2 · October 2026";
 
 export const ONE_LINER =
   "Trade 15m displacement breaks of marked levels in the direction of the 1H trend and VWAP, or fade failed breaks back to value. Max 3 trades. Two losses and done.";
@@ -112,18 +112,27 @@ export const SETUPS: Setup[] = [
   },
   {
     key: "C",
-    name: "Failed break / value-edge fade",
-    tagline: "Fade traps back to value.",
-    when: "Range days, or any time a break fails at an obvious level.",
+    name: "Failure test (liquidity sweep reversal)",
+    tagline: "The course's reversal setup — fade a break that couldn't hold.",
+    when: "Range days, or when a break pokes through PDH/PDL, overnight high/low, VAH/VAL or a zone and gets rejected.",
     trigger: [
-      "A 15m candle wicks through PDH/PDL, equal highs/lows, VAH or VAL — and closes back inside.",
-      "Or price returns to VAH/VAL inside a range and prints a rejection candle.",
+      "A 15m candle wicks through the level and CLOSES back inside (the indicator labels it “Failure test”).",
+      "Best when RSI(14) diverges — price made a new high/low, RSI didn't. The Breakout Lab tells you whether that's actually helping on your contracts.",
+      "Strong rejection: the close is in the half of the candle pointing back to value.",
     ],
-    entry: "On the 5m candle that confirms the turn back inside.",
-    stop: "Past the wick.",
-    targets: "T1: POC. T2: the opposite edge of value (or a naked POC).",
-    skip: ["The 15m closes outside and holds (that's acceptance — it's a breakout now)", "Against a strong 1H trend"],
+    entry: "At the close of the failure-test candle, or on the 5m candle that confirms the turn back inside.",
+    stop: "A few ticks past the wick.",
+    targets: "T1: POC or the middle of the range. T2: the next opposing zone. Take it only if T1 is at least 2R away.",
+    skip: ["The next 15m closes back outside (that's acceptance — it's a breakout now)", "Against a strong 1H trend", "T1 closer than 2R"],
   },
+];
+
+/** How the plan maps onto the course's four parts of a strategy. */
+export const PILLARS: { part: string; mine: string }[] = [
+  { part: "Level", mine: "Kinoe zones (week range, swings, VAH / POC / VAL, low-volume nodes) + PDH/PDL + overnight high/low." },
+  { part: "Trigger", mine: "A 15m candle close through the level (A), a pullback into VWAP (B), or a wick through and close back inside — a failure test (C)." },
+  { part: "Confirmation", mine: "Displacement candle for breakouts — proven by your Lab (63% vs 48%). RSI divergence for failure tests — being tested in the Lab." },
+  { part: "Risk", mine: "$100 per trade, stop past the level or wick, T1 at least 2R, two losses and done." },
 ];
 
 export const NO_TRADE: { rule: string; why: string }[] = [
@@ -165,7 +174,7 @@ export const CHECKLIST: string[] = [
   "I know the bias: trend up, trend down, or range",
   "Price is at one of my marked levels",
   "The 15m candle has CLOSED (no entering on the push)",
-  "It's a displacement candle — or this is a setup B / C trade",
+  "It's a displacement candle (A), a VWAP pullback (B), or a failure test (C) — the indicator labels it",
   "VWAP is on my side (or it's a range fade at VAH / VAL)",
   "T1 is at least 2R away",
   "Size = $100 ÷ (stop points × $ per point)",

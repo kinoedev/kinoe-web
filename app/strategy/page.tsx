@@ -7,7 +7,7 @@ import Topbar from "@/components/Topbar";
 import { safeJson } from "@/lib/http";
 import { money, todayTradingDay } from "@/lib/journal/format";
 import type { JournalTrade } from "@/lib/journal/store";
-import { BIAS, CHECKLIST, EVIDENCE, MANAGEMENT, NO_TRADE, ONE_LINER, PLAN_VERSION, POINT_VALUES, PREP, REVIEW, RISK, SETUPS } from "@/lib/strategy/plan";
+import { BIAS, CHECKLIST, EVIDENCE, MANAGEMENT, NO_TRADE, ONE_LINER, PILLARS, PLAN_VERSION, POINT_VALUES, PREP, REVIEW, RISK, SETUPS } from "@/lib/strategy/plan";
 
 function Section({ id, n, title, children }: { id: string; n: number; title: string; children: React.ReactNode }) {
   return (
@@ -154,7 +154,58 @@ const NAV = [
   ["risk", "Risk"],
   ["manage", "Managing"],
   ["review", "Review"],
+  ["tradingview", "TradingView indicator"],
 ];
+
+const PINE_PATH = "/kinoe-breakout-quality.pine";
+
+function TradingViewSetup() {
+  const [status, setStatus] = useState<string | null>(null);
+  const copy = async () => {
+    try {
+      const code = await fetch(PINE_PATH).then((r) => {
+        if (!r.ok) throw new Error();
+        return r.text();
+      });
+      await navigator.clipboard.writeText(code);
+      setStatus("Copied — paste it into TradingView's Pine Editor.");
+    } catch {
+      setStatus("Couldn't copy — use Download instead.");
+    }
+  };
+  const steps = [
+    "Open a 15m chart of MNQ1!, MES1!, MGC1! or MCL1! in TradingView.",
+    "Click Copy script below. In TradingView open Pine Editor (bottom panel), select all, paste, then Save and Add to chart.",
+    "In the Kinoe Scanner, press Copy for TradingView on the contract and paste it into the indicator's Zones box (Settings → Inputs).",
+    "Labels appear only after a 15m candle closes: STRONG ↑/↓ (displacement break), WEAK, TRAP and “Failure test” (+ RSI div when RSI diverges). Faint boxes are fair value gaps left by displacement.",
+    "Set alerts: Create alert → condition Kinoe BQ → \"Any alert() function call\", once per bar close.",
+  ];
+  return (
+    <div className="space-y-3">
+      <p className="text-sm leading-6 text-white/75">
+        <b className="text-white">Kinoe Breakout Quality</b> scores each 15m close through your zones with the same rules as the Scanner and Breakout Lab — displacement
+        first, volume, liquidity sweeps and 1H trend as small nudges — and flags failure tests with RSI divergence. One overlay, no extra panes.
+      </p>
+      <ol className="list-decimal space-y-1.5 pl-5 text-sm leading-6 text-white/70">
+        {steps.map((x) => (
+          <li key={x}>{x}</li>
+        ))}
+      </ol>
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <button onClick={copy} className="rounded-lg border border-purple-400/50 bg-purple-500/20 px-3 py-1.5 text-purple-50 hover:bg-purple-500/30">
+          Copy script
+        </button>
+        <a href={PINE_PATH} download className="rounded-lg border border-white/15 px-3 py-1.5 text-white/70 hover:text-white">
+          Download .pine
+        </a>
+        <Link href="/scanner" className="rounded-lg border border-white/15 px-3 py-1.5 text-white/70 hover:text-white">
+          Scanner
+        </Link>
+        {status ? <span className="text-white/50">{status}</span> : null}
+      </div>
+    </div>
+  );
+}
 
 export default function StrategyPage() {
   const setupColor = useMemo(() => ({ A: "text-emerald-200", B: "text-sky-200", C: "text-amber-200" }) as const, []);
@@ -201,6 +252,15 @@ export default function StrategyPage() {
                 run. Everything else the Lab tested (volume spikes, fair value gaps, liquidity sweeps, stochastic divergence) was noise on your contracts so far — useful context,
                 not reasons to take a trade.
               </p>
+              <div className="mt-4 text-[10px] uppercase tracking-widest text-white/40">Built on the course&apos;s four parts</div>
+              <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {PILLARS.map((p) => (
+                  <div key={p.part} className="rounded-xl border border-white/10 bg-black/30 px-3 py-2.5">
+                    <div className="text-xs font-medium text-purple-200">{p.part}</div>
+                    <div className="mt-0.5 text-[12px] leading-5 text-white/65">{p.mine}</div>
+                  </div>
+                ))}
+              </div>
             </Section>
 
             <Section id="prep" n={2} title="Prep">
@@ -317,6 +377,10 @@ export default function StrategyPage() {
                   Today&apos;s notebook
                 </Link>
               </div>
+            </Section>
+
+            <Section id="tradingview" n={9} title="TradingView indicator">
+              <TradingViewSetup />
             </Section>
           </div>
         </main>

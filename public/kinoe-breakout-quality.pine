@@ -1,0 +1,258 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// Kinoe — Breakout Quality & Failure Tests
+//
+// Built to match kinoe.dev's Breakout Lab. Use on the 15-minute chart.
+//  • Strong / Weak / Trap label on every 15m CLOSE through a level
+//      Strong = displacement candle: body ≥ 1× ATR(14), closing in the outer 30% of its range
+//      Trap   = small body (< 0.5× ATR) or a close off its extreme
+//    (On Ki's MNQ/MES/MGC/MCL data: breaks with a displacement candle kept going 63% of the time vs 48% without.)
+//  • Failure test (false breakout): wick through a level, close back inside — flagged when RSI divergence confirms
+//  • Fair value gaps left by displacement candles, as barely-tinted boxes
+//  • Levels: your Kinoe zones (paste from Scanner → "Copy for TradingView"), previous day high/low, overnight high/low
+//  • Labels print only after the candle closes — no repainting.
+
+//@version=6
+indicator("Kinoe Breakout Quality", shorttitle = "Kinoe BQ", overlay = true, max_boxes_count = 300, max_labels_count = 300)
+
+// ── Inputs ───────────────────────────────────────────────────────────────────
+grpLv = "Levels"
+zonesTxt  = input.text_area("", "Kinoe zones", tooltip = "Scanner → Copy for TradingView, then paste here. One zone per line: top;bottom;R or S;name", group = grpLv)
+drawZones = input.bool(true, "Draw Kinoe zones", group = grpLv)
+usePD     = input.bool(true, "Previous day high / low", group = grpLv)
+useON     = input.bool(true, "Overnight high / low (5 PM–8:30 AM CT, used in RTH)", group = grpLv)
+
+grpD = "Displacement"
+bodyMult = input.float(1.0, "Body ≥ × ATR(14)", minval = 0.1, step = 0.1, group = grpD)
+outerPct = input.float(0.7, "Close in the outer part of the range", minval = 0.5, maxval = 1.0, step = 0.05, group = grpD)
+markAll  = input.bool(false, "Mark every displacement candle (not just breaks)", group = grpD)
+
+grpB = "Breaks"
+showWeak = input.bool(true, "Show Weak breaks", group = grpB)
+showTrap = input.bool(true, "Show Trap breaks", group = grpB)
+useVol   = input.bool(true, "Relative volume (same 15m slot, last 10 sessions)", group = grpB)
+useTrend = input.bool(true, "1H structure (higher highs + lows)", group = grpB)
+
+grpF = "Failure tests"
+showFT   = input.bool(true, "Show failure tests", group = grpF)
+ftDivOnly = input.bool(false, "Only with RSI divergence", group = grpF)
+rsiLen   = input.int(14, "RSI length", minval = 2, group = grpF)
+
+grpG = "Fair value gaps"
+showFvg = input.bool(true, "Show FVGs from displacement candles", group = grpG)
+fvgLen  = input.int(24, "FVG box length (bars)", minval = 2, group = grpG)
+
+grpC = "Colours"
+cStrong = input.color(#34d399, "Strong", group = grpC)
+cWeak   = input.color(#9ca3af, "Weak", group = grpC)
+cTrap   = input.color(#f87171, "Trap", group = grpC)
+cFT     = input.color(#fbbf24, "Failure test", group = grpC)
+cRes    = input.color(#ef4444, "Resistance zone", group = grpC)
+cSup    = input.color(#10b981, "Support zone", group = grpC)
+
+// ── Candle anatomy ───────────────────────────────────────────────────────────
+atrPrev = ta.atr(14)[1]
+rng     = high - low
+body    = math.abs(close - open)
+bodyAtr = atrPrev > 0 ? body / atrPrev : 0.0
+locUp   = rng > 0 ? (close - low) / rng : 0.5
+locDn   = rng > 0 ? (high - close) / rng : 0.5
+dispUp  = close > open and bodyAtr >= bodyMult and locUp >= outerPct
+dispDn  = close < open and bodyAtr >= bodyMult and locDn >= outerPct
+fvgUp   = high[2] < low
+fvgDn   = low[2] > high
+prevC   = close[1]
+
+// ── Relative volume vs the same time of day ──────────────────────────────────
+type Slot
+    array<float> vols
+
+var map<int, Slot> slots = map.new<int, Slot>()
+slotKey = hour(time, "America/Chicago") * 60 + minute(time, "America/Chicago")
+float relVol = na
+if useVol and not na(volume)
+    Slot s = slots.get(slotKey)
+    if na(s)
+        s := Slot.new(array.new<float>())
+        slots.put(slotKey, s)
+    if s.vols.size() >= 3
+        avgV = s.vols.avg()
+        relVol := avgV > 0 ? volume / avgV : na
+    if barstate.isconfirmed
+        s.vols.push(volume)
+        if s.vols.size() > 10
+            s.vols.shift()
+
+// ── 1H structure (last two swing highs and lows) ─────────────────────────────
+f_structure() =>
+    ph = ta.pivothigh(high, 2, 2)
+    pl = ta.pivotlow(low, 2, 2)
+    h1 = ta.valuewhen(not na(ph), ph, 0)
+    h0 = ta.valuewhen(not na(ph), ph, 1)
+    l1 = ta.valuewhen(not na(pl), pl, 0)
+    l0 = ta.valuewhen(not na(pl), pl, 1)
+    h1 > h0 and l1 > l0 ? 1 : h1 < h0 and l1 < l0 ? -1 : 0
+
+trend1h = request.security(syminfo.tickerid, "60", f_structure()[1], lookahead = barmerge.lookahead_on)
+
+// ── RSI divergence (for failure tests) ───────────────────────────────────────
+rsi = ta.rsi(close, rsiLen)
+swH = ta.pivothigh(high, 2, 2)
+swL = ta.pivotlow(low, 2, 2)
+var float lastSwH = na
+var float lastSwHRsi = na
+var float lastSwL = na
+var float lastSwLRsi = na
+// Bearish: price above the last swing high, RSI below its reading there. Bullish mirror.
+bearDiv = not na(lastSwH) and high > lastSwH and rsi < lastSwHRsi
+bullDiv = not na(lastSwL) and low < lastSwL and rsi > lastSwLRsi
+if not na(swH)
+    lastSwH := swH
+    lastSwHRsi := rsi[2]
+if not na(swL)
+    lastSwL := swL
+    lastSwLRsi := rsi[2]
+
+// ── Levels ───────────────────────────────────────────────────────────────────
+pdh = request.security(syminfo.tickerid, "D", high[1], lookahead = barmerge.lookahead_on)
+pdl = request.security(syminfo.tickerid, "D", low[1], lookahead = barmerge.lookahead_on)
+
+ctMins  = hour(time, "America/Chicago") * 60 + minute(time, "America/Chicago")
+inON    = ctMins >= 17 * 60 or ctMins < 8 * 60 + 30
+newDay  = timeframe.change("D")
+var float onH = na
+var float onL = na
+if newDay
+    onH := high
+    onL := low
+else if inON
+    onH := na(onH) ? high : math.max(onH, high)
+    onL := na(onL) ? low : math.min(onL, low)
+
+// Kinoe zones from the text box: top;bottom;R|S;name
+var array<float>  zTop  = array.new<float>()
+var array<float>  zBot  = array.new<float>()
+var array<string> zSide = array.new<string>()
+var array<string> zName = array.new<string>()
+if barstate.isfirst and str.length(zonesTxt) > 0
+    for ln in str.split(zonesTxt, "\n")
+        parts = str.split(ln, ";")
+        if parts.size() >= 2
+            t = str.tonumber(str.replace_all(str.replace_all(parts.get(0), " ", ""), ",", ""))
+            b = str.tonumber(str.replace_all(str.replace_all(parts.get(1), " ", ""), ",", ""))
+            if not na(t) and not na(b)
+                zTop.push(math.max(t, b))
+                zBot.push(math.min(t, b))
+                zSide.push(parts.size() >= 3 ? str.upper(str.replace_all(parts.get(2), " ", "")) : "")
+                zName.push(parts.size() >= 4 ? parts.get(3) : "Zone")
+
+var bool zonesDrawn = false
+if drawZones and barstate.islast and not zonesDrawn and zTop.size() > 0
+    zonesDrawn := true
+    for i = 0 to zTop.size() - 1
+        isRes = zSide.get(i) == "R" or (zSide.get(i) == "" and zBot.get(i) > close)
+        col = isRes ? cRes : cSup
+        box.new(math.max(0, bar_index - 500), zTop.get(i), bar_index, zBot.get(i), border_color = color.new(col, 60), border_width = 1, extend = extend.both, bgcolor = color.new(col, 92), text = zName.get(i), text_size = size.tiny, text_color = color.new(col, 30), text_halign = text.align_right, text_valign = text.align_center)
+
+// Collect this bar's levels
+lvTop  = array.new<float>()
+lvBot  = array.new<float>()
+lvName = array.new<string>()
+if zTop.size() > 0
+    for i = 0 to zTop.size() - 1
+        lvTop.push(zTop.get(i))
+        lvBot.push(zBot.get(i))
+        lvName.push(zName.get(i))
+if usePD and not na(pdh)
+    lvTop.push(pdh), lvBot.push(pdh), lvName.push("PDH")
+    lvTop.push(pdl), lvBot.push(pdl), lvName.push("PDL")
+if useON and not inON and not na(onH)
+    lvTop.push(onH), lvBot.push(onH), lvName.push("ON high")
+    lvTop.push(onL), lvBot.push(onL), lvName.push("ON low")
+
+// ── Score (same weights as kinoe.dev) ────────────────────────────────────────
+f_score(int dir) =>
+    disp = dir > 0 ? dispUp : dispDn
+    loc  = dir > 0 ? locUp : locDn
+    fvg  = dir > 0 ? fvgUp : fvgDn
+    float s = 50.0
+    s += disp ? 25 : bodyAtr < 0.5 ? -15 : 0
+    s += not disp and loc < 0.5 ? -10 : 0
+    s += fvg ? 3 : 0
+    if useVol and not na(relVol)
+        s += relVol >= 1.5 ? 3 : relVol < 0.8 ? -3 : 0
+    if useTrend
+        s += trend1h == dir ? 2 : trend1h == -dir ? -2 : 0
+    math.max(0.0, math.min(100.0, s))
+
+// ── Find breaks and failure tests on this bar ────────────────────────────────
+int    bDir  = 0
+string bName = ""
+int    fDir  = 0
+string fName = ""
+float  fExt  = na
+n = lvTop.size()
+if n > 0
+    for i = 0 to n - 1
+        t = lvTop.get(i)
+        b = lvBot.get(i)
+        if bDir == 0 and prevC <= t and close > t
+            bDir := 1
+            bName := lvName.get(i)
+        else if bDir == 0 and prevC >= b and close < b
+            bDir := -1
+            bName := lvName.get(i)
+        if fDir == 0 and prevC <= t and high > t and close <= t
+            fDir := -1
+            fName := lvName.get(i)
+            fExt := high
+        else if fDir == 0 and prevC >= b and low < b and close >= b
+            fDir := 1
+            fName := lvName.get(i)
+            fExt := low
+
+score   = bDir != 0 ? f_score(bDir) : na
+quality = na(score) ? "" : score >= 70 ? "Strong" : score <= 35 ? "Trap" : "Weak"
+ftDiv   = fDir == -1 ? bearDiv : fDir == 1 ? bullDiv : false
+
+confirmed = barstate.isconfirmed
+strongUp  = confirmed and bDir == 1 and quality == "Strong"
+strongDn  = confirmed and bDir == -1 and quality == "Strong"
+trapBreak = confirmed and bDir != 0 and quality == "Trap"
+ftSignal  = confirmed and fDir != 0 and (ftDiv or not ftDivOnly)
+
+// ── Draw ─────────────────────────────────────────────────────────────────────
+if confirmed and bDir != 0
+    show = quality == "Strong" or (quality == "Weak" and showWeak) or (quality == "Trap" and showTrap)
+    if show
+        col = quality == "Strong" ? cStrong : quality == "Trap" ? cTrap : cWeak
+        why = (dispUp or dispDn ? "displacement" : bodyAtr < 0.5 ? "small body" : "") + (not na(relVol) ? " · vol " + str.tostring(relVol, "#.#") + "×" : "") + (useTrend and trend1h != 0 ? (trend1h == bDir ? " · with 1H" : " · against 1H") : "")
+        label.new(bar_index, bDir > 0 ? low : high, quality + (bDir > 0 ? " ↑ " : " ↓ ") + str.tostring(score, "#") + "\n" + bName,
+             style = bDir > 0 ? label.style_label_up : label.style_label_down, color = color.new(col, 15), textcolor = color.black, size = size.small, tooltip = why)
+
+if ftSignal and showFT
+    label.new(bar_index, fDir > 0 ? low : high, "Failure test " + (fDir > 0 ? "↑" : "↓") + (ftDiv ? " + RSI div" : "") + "\n" + fName,
+         style = fDir > 0 ? label.style_label_up : label.style_label_down, color = color.new(cFT, ftDiv ? 10 : 55), textcolor = color.black, size = size.small,
+         tooltip = "Wick through " + fName + ", closed back inside. Stop past the wick (" + str.tostring(fExt, format.mintick) + "). Target: next level or 2R.")
+
+if confirmed and showFvg and ((dispUp and fvgUp) or (dispDn and fvgDn))
+    top = dispUp ? low : low[2]
+    bot = dispUp ? high[2] : high
+    col = dispUp ? cStrong : cTrap
+    box.new(bar_index - 1, top, bar_index + fvgLen, bot, border_color = color.new(col, 75), bgcolor = color.new(col, 90))
+
+plotshape(markAll and confirmed and dispUp, "Displacement up", shape.diamond, location.belowbar, color.new(cStrong, 20), size = size.tiny)
+plotshape(markAll and confirmed and dispDn, "Displacement down", shape.diamond, location.abovebar, color.new(cTrap, 20), size = size.tiny)
+
+if timeframe.period != "15" and barstate.islast
+    var table note = table.new(position.bottom_right, 1, 1)
+    table.cell(note, 0, 0, "Kinoe BQ is tuned for the 15m chart", text_color = color.gray, text_size = size.small)
+
+// ── Alerts ───────────────────────────────────────────────────────────────────
+alertcondition(strongUp, "Strong breakout ↑", "{{ticker}} Strong breakout up on 15m close")
+alertcondition(strongDn, "Strong breakout ↓", "{{ticker}} Strong breakout down on 15m close")
+alertcondition(trapBreak, "Trap break", "{{ticker}} weak/trap break on 15m close — don't chase")
+alertcondition(ftSignal, "Failure test", "{{ticker}} failure test at a level on 15m close")
+if strongUp or strongDn
+    alert(syminfo.ticker + " Strong break " + (bDir > 0 ? "↑ " : "↓ ") + bName + " · score " + str.tostring(score, "#"), alert.freq_once_per_bar_close)
+if ftSignal
+    alert(syminfo.ticker + " Failure test " + (fDir > 0 ? "↑ " : "↓ ") + fName + (ftDiv ? " + RSI divergence" : ""), alert.freq_once_per_bar_close)

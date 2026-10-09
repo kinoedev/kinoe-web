@@ -160,6 +160,7 @@ function SymbolCard({ a }: { a: ScannerResult }) {
   const tick = sym?.tick ?? 0.01;
   const [showSet, setShowSet] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [tvCopied, setTvCopied] = useState(false);
 
   const copyText = useMemo(
     () =>
@@ -174,6 +175,20 @@ function SymbolCard({ a }: { a: ScannerResult }) {
       await navigator.clipboard.writeText(`${a.symbol} zones (week ${a.weekStart} → ${a.weekEnd})\n${copyText}`);
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* clipboard blocked */
+    }
+  };
+
+  // One zone per line for the Kinoe BQ TradingView indicator: top;bottom;R|S;name
+  const copyTv = async () => {
+    const text = a.zones
+      .map((z) => `${z.top};${z.bottom};${z.side === "resistance" ? "R" : "S"};${z.label.replace(/[;\n]/g, ",")}`)
+      .join("\n");
+    try {
+      await navigator.clipboard.writeText(text);
+      setTvCopied(true);
+      setTimeout(() => setTvCopied(false), 1500);
     } catch {
       /* clipboard blocked */
     }
@@ -236,6 +251,13 @@ function SymbolCard({ a }: { a: ScannerResult }) {
             className="rounded-lg border border-purple-400/30 bg-purple-500/10 px-2.5 py-1 text-purple-100 transition hover:bg-purple-500/20"
           >
             {copied ? "Copied" : "Copy zones"}
+          </button>
+          <button
+            onClick={copyTv}
+            title="Paste into the Kinoe BQ indicator's Zones input"
+            className="rounded-lg border border-purple-400/30 bg-purple-500/10 px-2.5 py-1 text-purple-100 transition hover:bg-purple-500/20"
+          >
+            {tvCopied ? "Copied" : "Copy for TradingView"}
           </button>
           {sym ? (
             <a
