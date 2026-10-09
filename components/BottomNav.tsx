@@ -15,8 +15,8 @@ const NAV = [
     ),
   },
   {
-    href: "/signals",
-    label: "Signals",
+    href: "/scanner",
+    label: "Scanner",
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
         <circle cx="11" cy="11" r="8"/>
@@ -37,19 +37,8 @@ const NAV = [
     ),
   },
   {
-    href: "/agent",
-    label: "Agent",
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
-        <rect x="4" y="4" width="16" height="16" rx="2"/>
-        <rect x="9" y="9" width="6" height="6"/>
-        <path d="M9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2"/>
-      </svg>
-    ),
-  },
-  {
-    href: "/analytics",
-    label: "Analytics",
+    href: "/journal/reports",
+    label: "Reports",
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
         <line x1="18" y1="20" x2="18" y2="10"/>

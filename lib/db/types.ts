@@ -45,6 +45,18 @@ export type JournalEntry = {
   ai_cost_usd: number | null;
 
   source: string;
+
+  // Imported / reviewed trades (journal v2)
+  account_id?: string | null;
+  quantity?: number | null;
+  gross_pnl?: number | null;
+  fees?: number | null;
+  trading_day?: string | null;
+  duration_sec?: number | null;
+  executions_json?: { ts: number; side: "BUY" | "SELL"; qty: number; price: number; fee?: number }[] | null;
+  playbook_id?: string | null;
+  rules_followed?: string[];
+  rating?: number | null;
 };
 
 export type NewJournalEntry = {

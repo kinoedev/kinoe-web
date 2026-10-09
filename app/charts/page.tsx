@@ -1,27 +1,25 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useId, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import Sidebar from "@/components/Sidebar";
+import { FUTURES_SYMBOLS } from "@/lib/futures/symbols";
 
 declare global {
   interface Window {
-    TradingView?: any;
+    TradingView?: { widget: new (config: Record<string, unknown>) => unknown };
   }
 }
 
-const PAIRS = [
-  { label: "EUR/USD", symbol: "OANDA:EURUSD" },
-  { label: "GBP/USD", symbol: "OANDA:GBPUSD" },
-  { label: "XAU/USD", symbol: "OANDA:XAUUSD" },
-  { label: "USD/JPY", symbol: "OANDA:USDJPY" },
-  { label: "GBP/JPY", symbol: "OANDA:GBPJPY" },
-  { label: "USD/CAD", symbol: "OANDA:USDCAD" },
-];
+const PAIRS = FUTURES_SYMBOLS.map((f) => ({ label: f.root, symbol: f.tradingView }));
 
-export default function ChartsPage() {
-  const [symbol, setSymbol] = useState(PAIRS[0].symbol);
+function ChartsView() {
+  // Deep links from the scanner: /charts?symbol=CME_MINI:MNQ1!
+  const requested = useSearchParams().get("symbol");
+  const [symbol, setSymbol] = useState(requested ?? PAIRS[0].symbol);
   const hostRef = useRef<HTMLDivElement>(null);
-  const containerId = useMemo(() => "tv_full_" + Math.random().toString(16).slice(2), []);
+  const reactId = useId();
+  const containerId = "tv_full_" + reactId.replace(/[^a-zA-Z0-9]/g, "");
 
   useEffect(() => {
     if (!hostRef.current) return;
@@ -54,8 +52,8 @@ export default function ChartsPage() {
       new window.TradingView.widget({
         autosize: true,
         symbol,
-        interval: "240",
-        timezone: "Etc/UTC",
+        interval: "15",
+        timezone: "America/Chicago",
         theme: "dark",
         style: "1",
         locale: "en",
@@ -104,5 +102,13 @@ export default function ChartsPage() {
         <div className="flex-1 min-h-0" ref={hostRef} />
       </div>
     </div>
+  );
+}
+
+export default function ChartsPage() {
+  return (
+    <Suspense fallback={<div className="h-screen bg-black" />}>
+      <ChartsView />
+    </Suspense>
   );
 }

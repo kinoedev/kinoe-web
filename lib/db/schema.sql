@@ -242,3 +242,137 @@ CREATE TABLE IF NOT EXISTS notification_subscriptions (
   identifier  TEXT NOT NULL UNIQUE,
   active      BOOLEAN NOT NULL DEFAULT true
 );
+
+-- ─── Futures scanner ──────────────────────────────────────────────────────────
+
+-- Cached Databento OHLCV bars, so each bar is only paid for once
+CREATE TABLE IF NOT EXISTS futures_bars (
+  symbol    TEXT NOT NULL,
+  schema    TEXT NOT NULL,
+  ts        TIMESTAMPTZ NOT NULL,
+  open      DOUBLE PRECISION NOT NULL,
+  high      DOUBLE PRECISION NOT NULL,
+  low       DOUBLE PRECISION NOT NULL,
+  close     DOUBLE PRECISION NOT NULL,
+  volume    BIGINT NOT NULL,
+  PRIMARY KEY (symbol, schema, ts)
+);
+
+-- Which time ranges have been downloaded (bars are only emitted when trades occur,
+-- so the newest bar alone can't tell us what has already been paid for)
+CREATE TABLE IF NOT EXISTS futures_coverage (
+  symbol        TEXT NOT NULL,
+  schema        TEXT NOT NULL,
+  covered_from  TIMESTAMPTZ NOT NULL,
+  covered_until TIMESTAMPTZ NOT NULL,
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (symbol, schema)
+);
+
+-- Every paid Databento pull, to track how fast the credit is being used
+CREATE TABLE IF NOT EXISTS futures_fetch_log (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  symbol      TEXT NOT NULL,
+  schema      TEXT NOT NULL,
+  range_start TIMESTAMPTZ NOT NULL,
+  range_end   TIMESTAMPTZ NOT NULL,
+  rows        INT NOT NULL,
+  cost_usd    NUMERIC(10,6) NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS futures_fetch_log_created_at_idx ON futures_fetch_log(created_at DESC);
+
+-- One row per symbol per scan: the zones as they were computed
+CREATE TABLE IF NOT EXISTS futures_zone_snapshots (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  symbol        TEXT NOT NULL,
+  week_start    DATE NOT NULL,
+  week_end      DATE NOT NULL,
+  as_of         TIMESTAMPTZ NOT NULL,
+  last_price    DOUBLE PRECISION NOT NULL,
+  analysis_json JSONB NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS futures_zone_snapshots_symbol_idx ON futures_zone_snapshots(symbol, created_at DESC);
+
+-- Backtester: full results (stats, breakdowns, skips) per run
+ALTER TABLE backtests ADD COLUMN IF NOT EXISTS results_jsonb JSONB;
+
+-- ─── Journal v2 (TradeZella-style) ────────────────────────────────────────────
+
+-- Prop firm / broker accounts trades are imported into
+CREATE TABLE IF NOT EXISTS trading_accounts (
+  id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  name             TEXT NOT NULL,
+  firm             TEXT,
+  platform         TEXT NOT NULL DEFAULT 'Tradovate',
+  account_number   TEXT,
+  starting_balance NUMERIC(14,2),
+  profit_target    NUMERIC(14,2),
+  daily_loss_limit NUMERIC(14,2),
+  max_drawdown     NUMERIC(14,2),
+  drawdown_type    TEXT NOT NULL DEFAULT 'EOD_TRAILING' CHECK (drawdown_type IN ('EOD_TRAILING','STATIC','NONE')),
+  fees_micro_rt    NUMERIC(8,2) NOT NULL DEFAULT 0,
+  fees_mini_rt     NUMERIC(8,2) NOT NULL DEFAULT 0,
+  timezone         TEXT NOT NULL DEFAULT 'America/Chicago',
+  status           TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','PASSED','FUNDED','FAILED','CLOSED')),
+  notes            TEXT
+);
+
+-- One row per uploaded file
+CREATE TABLE IF NOT EXISTS trade_imports (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  account_id      UUID REFERENCES trading_accounts(id) ON DELETE CASCADE,
+  filename        TEXT,
+  format          TEXT NOT NULL,
+  rows_read       INT NOT NULL DEFAULT 0,
+  trades_created  INT NOT NULL DEFAULT 0,
+  duplicates      INT NOT NULL DEFAULT 0,
+  date_from       TIMESTAMPTZ,
+  date_to         TIMESTAMPTZ
+);
+
+-- Strategies with their rules; can be linked to a backtested setup (A or B)
+CREATE TABLE IF NOT EXISTS playbooks (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  name            TEXT NOT NULL,
+  description_md  TEXT,
+  rules           JSONB NOT NULL DEFAULT '[]',
+  backtest_setup  TEXT CHECK (backtest_setup IN ('A','B')),
+  archived        BOOLEAN NOT NULL DEFAULT false
+);
+
+-- Daily notebook: plan before the session, review after
+CREATE TABLE IF NOT EXISTS daily_notes (
+  trading_day     DATE PRIMARY KEY,
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  premarket_md    TEXT,
+  review_md       TEXT,
+  mood            TEXT,
+  rating          INT CHECK (rating BETWEEN 1 AND 5),
+  followed_plan   BOOLEAN
+);
+
+-- Imported-trade fields on the existing journal
+ALTER TABLE journal_entries ADD COLUMN IF NOT EXISTS account_id     UUID REFERENCES trading_accounts(id) ON DELETE SET NULL;
+ALTER TABLE journal_entries ADD COLUMN IF NOT EXISTS import_id      UUID REFERENCES trade_imports(id) ON DELETE SET NULL;
+ALTER TABLE journal_entries ADD COLUMN IF NOT EXISTS import_hash    TEXT;
+ALTER TABLE journal_entries ADD COLUMN IF NOT EXISTS quantity       NUMERIC(12,2);
+ALTER TABLE journal_entries ADD COLUMN IF NOT EXISTS gross_pnl      NUMERIC(14,2);
+ALTER TABLE journal_entries ADD COLUMN IF NOT EXISTS fees           NUMERIC(12,2);
+ALTER TABLE journal_entries ADD COLUMN IF NOT EXISTS trading_day    DATE;
+ALTER TABLE journal_entries ADD COLUMN IF NOT EXISTS duration_sec   INT;
+ALTER TABLE journal_entries ADD COLUMN IF NOT EXISTS executions_json JSONB;
+ALTER TABLE journal_entries ADD COLUMN IF NOT EXISTS playbook_id    UUID REFERENCES playbooks(id) ON DELETE SET NULL;
+ALTER TABLE journal_entries ADD COLUMN IF NOT EXISTS rules_followed TEXT[] NOT NULL DEFAULT '{}';
+ALTER TABLE journal_entries ADD COLUMN IF NOT EXISTS rating         INT;
+
+CREATE UNIQUE INDEX IF NOT EXISTS journal_entries_import_hash_idx ON journal_entries(import_hash);
+CREATE INDEX IF NOT EXISTS journal_entries_trading_day_idx ON journal_entries(trading_day);
+CREATE INDEX IF NOT EXISTS journal_entries_account_idx ON journal_entries(account_id);

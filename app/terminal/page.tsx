@@ -3,7 +3,7 @@
 import Sidebar from "@/components/Sidebar";
 import Topbar from "@/components/Topbar";
 import ChartPanel from "@/components/ChartPanel";
-import SignalPanel from "@/components/SignalPanel";
+import ScannerPanel from "@/components/ScannerPanel";
 
 export default function TerminalPage() {
   return (
@@ -15,14 +15,14 @@ export default function TerminalPage() {
 
       <div className="relative flex min-h-screen">
         <Sidebar />
-        <main className="flex-1">
+        <main className="min-w-0 flex-1">
           <Topbar />
           <div className="grid gap-4 p-4 pb-24 md:p-6 md:pb-8 lg:grid-cols-3">
             <div className="lg:col-span-2">
               <ChartPanel />
             </div>
             <div className="lg:col-span-1">
-              <SignalPanel />
+              <ScannerPanel />
             </div>
           </div>
         </main>

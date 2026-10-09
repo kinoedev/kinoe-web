@@ -1,75 +1,43 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 
-type AgentStatus = {
+type FuturesStatus = {
   ok?: boolean;
-  agent?: string;
+  configured?: boolean;
+  dataThrough?: string | null;
+  scannedAt?: string | null;
+  spend?: { total: number };
   error?: string;
-  balance?: string | null;
-  currency?: string | null;
-  nav?: string | null;
 };
 
-type SidebarProps = {
-  agentOnline?: boolean;
-  lastCheckedAt?: number | null;
-};
-
-export default function Sidebar(_props: SidebarProps = {}) {
+export default function Sidebar() {
   const pathname = usePathname();
-
-  const [status, setStatus] = useState<AgentStatus | null>(null);
-  const [lastCheckedAt, setLastCheckedAt] = useState<number | null>(null);
-
-  const isOnline = useMemo(() => {
-    return status?.ok === true && status?.agent === "online";
-  }, [status]);
+  const [status, setStatus] = useState<FuturesStatus | null>(null);
 
   useEffect(() => {
     let alive = true;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-
-    const poll = async () => {
-      try {
-        const res = await fetch("/api/agent/status", {
-          method: "GET",
-          cache: "no-store",
-          headers: { Accept: "application/json" },
-        });
-
-        const data = (await res.json()) as AgentStatus;
-
-        if (!alive) return;
-        setStatus(data);
-        setLastCheckedAt(Date.now());
-      } catch (e: any) {
-        if (!alive) return;
-        setStatus({ ok: false, agent: "offline", error: e?.message ?? "fetch failed" });
-        setLastCheckedAt(Date.now());
-      } finally {
-        if (!alive) return;
-        timer = setTimeout(poll, 60000);
-      }
-    };
-
-    poll();
-
+    fetch("/api/futures/status", { cache: "no-store", headers: { Accept: "application/json" } })
+      .then((r) => r.json())
+      .then((d: FuturesStatus) => alive && setStatus(d))
+      .catch((e: unknown) => alive && setStatus({ ok: false, error: e instanceof Error ? e.message : "fetch failed" }));
     return () => {
       alive = false;
-      if (timer) clearTimeout(timer);
     };
   }, []);
+
+  const ready = status?.ok === true && status.configured === true;
+  const fmtCt = (v: string) =>
+    new Date(v).toLocaleString("en-US", { timeZone: "America/Chicago", weekday: "short", hour: "numeric", minute: "2-digit" }) + " CT";
 
   const navItems = [
     { label: "Terminal", href: "/terminal" },
     { label: "Charts", href: "/charts" },
-    { label: "Signals", href: "/signals" },
+    { label: "Scanner", href: "/scanner" },
+    { label: "Backtest", href: "/backtest" },
     { label: "Journal", href: "/journal" },
-    { label: "Agent", href: "/agent" },
-    { label: "Analytics", href: "/analytics" },
     { label: "Market", href: "/market" },
     { label: "Settings", href: "/settings" },
   ];
@@ -83,7 +51,7 @@ export default function Sidebar(_props: SidebarProps = {}) {
 
       <nav className="px-3">
         {navItems.map((item) => {
-          const active = pathname === item.href;
+          const active = pathname === item.href || pathname.startsWith(item.href + "/");
           return (
             <Link
               key={item.href}
@@ -104,32 +72,20 @@ export default function Sidebar(_props: SidebarProps = {}) {
           <div className="text-xs text-white/60">Status</div>
 
           <div className="mt-2 flex items-center gap-2">
-            <span
-              className={[
-                "inline-block h-2.5 w-2.5 rounded-full",
-                isOnline ? "bg-emerald-400" : "bg-white/25",
-              ].join(" ")}
-            />
+            <span className={["inline-block h-2.5 w-2.5 rounded-full", ready ? "bg-emerald-400" : "bg-white/25"].join(" ")} />
             <div className="text-sm font-medium text-white">
-              {isOnline ? "OANDA connected" : "OANDA offline"}
+              {ready ? "Databento connected" : status?.configured === false ? "Databento key missing" : "Databento offline"}
             </div>
           </div>
 
-          {isOnline && status?.balance ? (
-            <div className="mt-2 text-xs text-white/60">
-              {status.currency} {Number(status.balance).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-            </div>
+          {status?.dataThrough ? (
+            <div className="mt-2 text-xs text-white/60">Data through {fmtCt(status.dataThrough)}</div>
+          ) : null}
+          {status?.spend ? (
+            <div className="mt-1 text-[11px] text-white/40">Credit used ${status.spend.total.toFixed(2)}</div>
           ) : null}
 
-          {status?.error ? (
-            <div className="mt-2 text-[11px] text-red-300/70">
-              {String(status.error)}
-            </div>
-          ) : null}
-
-          <div className="mt-2 text-[11px] text-white/30">
-            {lastCheckedAt ? `Checked ${new Date(lastCheckedAt).toLocaleTimeString()}` : "Connecting..."}
-          </div>
+          {status?.error ? <div className="mt-2 text-[11px] text-red-300/70">{String(status.error)}</div> : null}
         </div>
       </div>
     </aside>

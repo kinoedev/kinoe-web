@@ -1,6 +1,6 @@
 # kinoe-web — Build Guide
 
-A private trading platform for naked forex/CFD price action. Tracks signals, journals trades, grades entries with AI, and builds a data set for future bot training. Designed as a single-user tool — one password, no user accounts.
+A private trading platform for futures price action. Scans MNQ, MES, MGC and MCL for auto key-level zones, journals trades, grades entries with AI, and builds a data set for future bot training. Designed as a single-user tool — one password, no user accounts.
 
 ---
 
@@ -8,14 +8,13 @@ A private trading platform for naked forex/CFD price action. Tracks signals, jou
 
 | Section | What it is |
 |---|---|
-| **Terminal** | Home dashboard — TradingView chart + live single-pair signal scan (rule engine, no AI cost) |
-| **Charts** | Full-screen TradingView Advanced Chart with 6-pair quick switcher and drawing tools |
-| **Signals** | Rule-based market scanner (H4). Detects Kangaroo Tail, Big Shadow, Inside Bar. Scores confidence, calculates trade plans. Claude summarises findings — never invents values. |
-| **Journal** | Manual and agent-logged trade entries. AI grades each entry on process, risk, and thesis quality. |
-| **Agent** | Autonomous scanner — scans all configured pairs, sends Telegram alerts with Approve/Deny/Journal buttons. Approve places a live GTC STOP order on OANDA. |
-| **Analytics** | Win rate, profit factor, equity curve, breakdown by pair/setup/source (agent vs kierra). |
-| **Market** | Session timeline, live prices, Forex Factory calendar, TradingView news widget. |
-| **Settings** | OANDA account status, AI spend, journal stats, env var health check. |
+| **Terminal** | Home dashboard — TradingView chart (15m default, Chicago time) + compact zone scanner showing which contract is nearest a level |
+| **Charts** | Full-screen TradingView Advanced Chart with a futures quick switcher. Accepts `?symbol=CME_MINI:MNQ1!` deep links from the scanner. |
+| **Scanner** | Futures key-level zone scanner. Pulls CME data from Databento (cached), builds the weekly level set and 3–5 rectangle zones per contract, and ranks contracts by how close price is to a zone. |
+| **Backtest** | Walk-forward backtest of the 1H / 15m / 5m zone strategy (setups A and B) on cached CME 1-minute data. Win rate, expectancy, drawdown, equity curve, and a breakdown by setup, session, direction and contract. |
+| **Journal** | TradeZella-style journal: Tradovate imports (Performance PDF/CSV, Orders CSV), dashboard (stats, Kinoe score, cumulative P&L, P&L calendar), prop-firm tracker per account (balance, EOD-trailing drawdown floor, daily loss limit, profit target), reports (symbol, hour, weekday, hold time, playbook, mistakes, account), playbooks with rules checklists compared against backtests, daily notebook, per-trade review (playbook, rules followed, stop → R, rating, mistake/emotion tags) and AI grading. `/analytics` redirects to Journal → Reports. |
+| **Market** | Session timeline, TradingView futures quotes, USD economic calendar, futures news. |
+| **Settings** | Databento status and credit used, AI spend, journal stats, env var health check. |
 
 ---
 
@@ -27,8 +26,7 @@ A private trading platform for naked forex/CFD price action. Tracks signals, jou
 | Language | TypeScript 5 |
 | Styling | Tailwind CSS v4 |
 | Database | Neon Postgres (serverless) |
-| Broker data | OANDA REST API v3 |
-| AI — signals | Anthropic (`claude-sonnet-4-6` default, configurable) |
+| Market data | Databento Historical API — CME Globex (`GLBX.MDP3`), OHLCV 1m + 1h |
 | AI — journal grader | Anthropic or OpenAI (configurable per call) |
 | Charts | TradingView Lightweight/Advanced Widget (CDN embed) |
 | Deployment | Vercel |
@@ -42,7 +40,7 @@ A private trading platform for naked forex/CFD price action. Tracks signals, jou
 |---|---|---|
 | **Vercel** | [vercel.com](https://vercel.com) | Free tier works. Hosts the app and stores env vars. |
 | **Neon** | [neon.tech](https://neon.tech) | Free tier works. Serverless Postgres. Copy the pooled `DATABASE_URL`. |
-| **OANDA** | [oanda.com](https://www.oanda.com) | Practice account is free. API key is in My Account → API Access. |
+| **Databento** | [databento.com](https://databento.com) | New accounts get $125 of usage credit (expires after 6 months). Historical pulls are billed against it. API key is in the portal → API Keys. |
 | **Anthropic** | [console.anthropic.com](https://console.anthropic.com) | Pay-as-you-go. ~$0.01 per scan, ~$0.01–0.05 per journal grade. |
 | **OpenAI** _(optional)_ | [platform.openai.com](https://platform.openai.com) | Only needed if using OpenAI for journal grading instead of Anthropic. |
 | **Telegram** | [t.me/BotFather](https://t.me/BotFather) | Create a bot → get `TELEGRAM_BOT_TOKEN`. Then message [@userinfobot](https://t.me/userinfobot) to get your `TELEGRAM_CHAT_ID`. |
@@ -58,16 +56,15 @@ Set all of these in Vercel → Project → Settings → Environment Variables (a
 | `SITE_PASSWORD` | ✅ | The login password. Pick anything strong. |
 | `SITE_AUTH_SECRET` | ✅ | Secret for signing auth cookies. Generate with `openssl rand -hex 32`. |
 | `DATABASE_URL` | ✅ | Neon Postgres connection string (pooled). Starts with `postgresql://`. |
-| `OANDA_API_KEY` | ✅ | OANDA personal access token from your account portal. |
-| `OANDA_ACCOUNT_ID` | ✅ | Your OANDA account number (e.g. `101-001-1234567-001`). |
-| `OANDA_ACCOUNT_TYPE` | ✅ | `practice` or `live`. Controls which OANDA base URL is used. |
+| `DATABENTO_API_KEY` | ✅ | Databento API key. Used for historical CME bars. |
+| `BACKTEST_MAX_DAYS` | ⬜ | Longest backtest window in days (default `90`). 1-minute bars are kept for this many days + 15. |
+| `DATABENTO_MAX_COST_USD` | ⬜ | Per-scan credit limit (default `1`). A scan estimated above this asks for confirmation on the Scanner page before spending. |
 | `ANTHROPIC_API_KEY` | ✅ | Anthropic API key for signal summaries and journal grading. |
 | `OPENAI_API_KEY` | ⬜ | OpenAI API key. Only needed if you want to grade journal entries with GPT. |
-| `AI_MODEL_SCANNER` | ⬜ | Override the signal scanner model. Defaults to `claude-sonnet-4-6`. |
 | `AI_SKIP` | ⬜ | Set to `true` in `.env.local` only. Skips AI call during local testing — zero cost. Never set on Vercel. |
 | `MIGRATE_TOKEN` | ⬜ | Secret token to protect the `/api/db/migrate` endpoint. Only needed if you run migrations via HTTP instead of CLI. |
-| `TELEGRAM_BOT_TOKEN` | ⬜ | Bot token from @BotFather on Telegram. Required for agent alerts and approve/deny buttons. |
-| `TELEGRAM_CHAT_ID` | ⬜ | Your personal Telegram chat ID (fallback if not set in Agent settings page). Get it from @userinfobot. |
+| `TELEGRAM_BOT_TOKEN` | ⬜ | Bot token from @BotFather on Telegram. Kept for upcoming zone alerts (`lib/telegram.ts`). |
+| `TELEGRAM_CHAT_ID` | ⬜ | Your personal Telegram chat ID. Get it from @userinfobot. |
 
 ### Generating secrets locally
 
@@ -121,10 +118,10 @@ The script is idempotent — every `CREATE` uses `IF NOT EXISTS`. Safe to re-run
 | Column | Type | Notes |
 |---|---|---|
 | `id` | UUID | Primary key |
-| `pair` | TEXT | e.g. `EUR_USD` |
-| `timeframe` | TEXT | e.g. `H4` |
+| `pair` | TEXT | Symbol, e.g. `MNQ` (column name kept from the forex version) |
+| `timeframe` | TEXT | e.g. `M15` |
 | `direction` | TEXT | `LONG` or `SHORT` |
-| `setup_type` | TEXT | `Kangaroo Tail`, `Big Shadow`, `Inside Bar` |
+| `setup_type` | TEXT | Free text, e.g. `Close-through`, `Zone rejection` |
 | `entry_price` | NUMERIC | |
 | `stop_loss` | NUMERIC | |
 | `take_profit` | NUMERIC | |
@@ -142,6 +139,28 @@ The script is idempotent — every `CREATE` uses `IF NOT EXISTS`. Safe to re-run
 | `source` | TEXT | `kierra` (manual entry) or `agent` (approved signal) |
 
 **`backtests`** — future use, table is created but not yet wired to UI.
+
+**`futures_bars`** — cached Databento OHLCV bars (`ohlcv-1h` ~5 months, `ohlcv-1m` last 30 days). Primary key `(symbol, schema, ts)`.
+
+**`futures_coverage`** — the time range already downloaded per symbol/schema, so the same range is never paid for twice.
+
+**`futures_fetch_log`** — every paid Databento pull with its estimated cost. Feeds the credit-used figures in Settings and the sidebar.
+
+**`futures_zone_snapshots`** — one row per symbol per scan with the full zone analysis (JSONB). The Scanner page loads the latest snapshot without calling Databento.
+
+**`backtests`** — one row per backtest run per contract: window, params, every trade (`trades_jsonb`), and stats/breakdown/skip counts (`results_jsonb`).
+
+The forex-era `agent_*` tables are left in place (not dropped) so historic data is kept; nothing writes to them any more.
+
+**`trading_accounts`** — prop/broker accounts: size, profit target, daily loss limit, max drawdown + type (EOD trailing / static), fee rates for CSV imports, status (evaluation, funded, blown…).
+
+**`trade_imports`** — one row per upload (file name, format, trades added, duplicates skipped). Deleting one removes the trades it added.
+
+**`playbooks`** — strategies with a rules checklist; optionally linked to backtest setup A or B. Two starter playbooks are created on first use.
+
+**`daily_notes`** — pre-market plan, post-session review, mood, rating, followed-plan per CME trading day.
+
+`journal_entries` gained: `account_id`, `import_id`, `import_hash` (unique — re-importing skips existing trades), `quantity`, `gross_pnl`, `fees`, `trading_day`, `duration_sec`, `executions_json`, `playbook_id`, `rules_followed`, `rating`. `pnl` is net of fees.
 
 **`ai_analyses`** — audit log of every AI call. Stores prompt, response, token counts, and cost. Used by Settings page to show all-time AI spend. Will feed bot training data later.
 
@@ -164,88 +183,32 @@ Next.js 16 silently ignores `middleware.ts` exports not named `middleware`. The 
 
 ---
 
-## Signals engine
+## Futures scanner
 
-The scanner runs in two strict phases. AI cannot invent values.
-
-### Phase 1 — Rule engine (`lib/signals/`)
-
-The rule engine is split into focused sub-modules (each under 100 lines):
+### Data (`lib/futures/`)
 
 | File | Responsibility |
 |---|---|
-| `candles.ts` | OANDA candle parser, `OandaCandle` / `ParsedCandle` types |
-| `bias.ts` | `getTrendBias` (H4) and `getHigherTimeframeBias` (D1) |
-| `patterns.ts` | `detectKangarooTail`, `detectBigShadow`, `detectInsideBar` |
-| `levels.ts` | `extractKeyLevelsDetailed`, `calculateMarketState`, `calculateADR` |
-| `confidence.ts` | Weighted confidence scoring with full `ConfidenceBreakdown`, blockers, trigger conditions |
-| `planner.ts` | `buildTradePlan` — entry trigger, SL, TP, RR, invalidation |
-| `detection.ts` | Thin orchestrator — imports all sub-modules, exports `runFullPairAnalysis` |
+| `symbols.ts` | MNQ, MES, MGC, MCL — tick size, tick value, Databento continuous symbol (`MNQ.v.0` = highest-volume contract, rolls automatically), TradingView symbol |
+| `databento.ts` | Minimal HTTP client: `getAvailableEnd`, `getCost`, `fetchBars` (JSON lines, handles pretty or fixed-point prices) |
+| `store.ts` | Bar cache in Neon: plans only the missing ranges, prices them with `metadata.get_cost`, downloads, records coverage and spend |
+| `sessions.ts` | CME Globex sessions (17:00 → 16:00 America/Chicago, DST-aware), aggregation, ATR |
+| `scanner.ts` | `runFuturesScan()` — cost guard → download new bars → compute zones → save snapshots |
 
-`runFullPairAnalysis(pair, h4Candles, d1Candles, utcHour?)` returns `PairAnalysisResult`:
+Every scan only downloads bars newer than what's already cached, so after the first backfill a weekly scan costs a few cents of credit. Databento's continuous contracts are not back-adjusted, so levels far back across a roll can be offset by the roll spread — the weekly set (last 5 sessions) is unaffected.
 
-| Field | Description |
-|---|---|
-| `higherTimeframeBias` | D1 directional bias: `BULLISH`, `BEARISH`, `NEUTRAL` |
-| `executionTimeframeBias` | H4 directional bias |
-| `marketState` | `TRENDING`, `RANGING`, `BREAKOUT`, `REVERSAL` |
-| `setupDetected` | Boolean — any valid pattern on the latest candle |
-| `setupType` | `Kangaroo Tail`, `Big Shadow`, `Inside Bar`, or null |
-| `keyLevels` | Up to 6 swing levels, each with `strengthScore` (0–100) and `reason` |
-| `confidenceScore` | 0–100 composite score |
-| `confidenceBreakdown` | Per-factor breakdown (stored in `analysis_json` for audit) |
-| `tradeStatus` | `TRADE_READY`, `WATCHLIST`, `NO_TRADE`, `AVOID` |
-| `blockers` | List of reasons why this is not a clean trade |
-| `triggerConditions` | What to watch for to enter |
-| `potentialTradePlan` | Entry trigger, stop loss, take profit, RR, invalidation |
+### Zones engine (`lib/indicators/`)
 
-**Confidence score — weighted multi-factor (max 100):**
+`analyzeZones()` in `zones.ts` encodes the weekly level routine:
 
-| Factor | Range | Notes |
-|---|---|---|
-| H4 trend | 0–20 | H4 bias is directional |
-| D1 alignment | 0–20 | D1 agrees with H4 direction |
-| Setup pattern | 0–25 | KT=25, Big Shadow=20, Inside Bar=12 |
-| Key level proximity | 0–15 | Strong level within 0.3% (+15) or medium within 0.5% (+8) |
-| Session timing | 0–15 | London+NY overlap=15, London=12, NY=10, Tokyo=5, dead=0 |
-| Market state | −10 to +8 | TRENDING=+8, BREAKOUT=+5, RANGING=-5, REVERSAL=-10 |
-| Structure zone | −15 to +15 | Entry at HL/LH zone=+15, counter-structure=−15 |
-| R:R quality | 0–5 | R:R ≥ 3.5 = +5, ≥ 3 = +3 |
+- **Week-scoped set** — 5-session range high/low, last session's day high/low, VAH / POC / VAL (70% value area from 1m bars, `profile.ts`), low-volume nodes, and the outer swing high/low.
+- **Swings nest outside the range** — the swing high is the nearest 60m pivot above the week high (and the swing low below the week low), never inside it.
+- **Long-term structure** — clusters of 4+ 60m pivots over ~5 months, plus the lookback high/low.
+- **Tests and breaks** — counted on 60m bars over the last 20 sessions. A visit that leaves on the side it came from is a test; one that closes out the other side is a break. A visit still in progress is flagged "testing now".
+- **Volume context** — levels in thin parts of the profile (not the naturally thin edges) score higher and are labelled `low-volume`.
+- **Output** — nearby levels merge into rectangle zones; 3–5 are picked, spaced at least half an hourly ATR apart, with both sides of price represented and at most two structure-only zones. Labels read `price — reason · N tests, M breaks`.
 
-**Naked forex rules built into the engine:**
-
-- **50% body rule** — KT close must land in the correct half of the candle range (upper half for bullish, lower half for bearish). Rejects weak rejections that technically have a long wick but no follow-through. Same rule applied to Big Shadow.
-- **ATR buffer on SL** — Stop loss is set 0.3× ATR14 beyond the candle extreme. Prevents noise stop-outs from wicks that don't represent actual invalidation.
-- **Clear path filter** — Before marking a setup TRADE_READY, checks that no key level with strength ≥ 60 sits between entry and target within 1R. Adds a blocker if path is obstructed.
-- **Market structure (HH/HL/LH/LL)** — Detects swing structure from the last 100 H4 candles. Bullish structure (series of HH+HL), bearish structure (LH+LL). +15 confidence when entry is at a structural HL or LH zone. −15 when entry is counter-structure. Structural zone = within 0.5% of last HL (long) or LH (short).
-- **Structure vs bias blocker** — If H4 bias and detected structure directly conflict (e.g., H4 bullish but market making LH+LL), adds a hard blocker.
-
-**Trade status rules:**
-- `AVOID` — H4 and D1 biases conflict (trap risk)
-- `TRADE_READY` — setup detected + confidence ≥ 65 + no hard blockers
-- `WATCHLIST` — confidence ≥ 35 OR (bias + setup present)
-- `NO_TRADE` — everything else
-
-**Pattern definitions:**
-- **Kangaroo Tail** — Rejection candle. Wick > 60% of range, body < 30% of range. Must align with H4 trend bias.
-- **Big Shadow** — Engulfing candle. High > previous high AND low < previous low. Body > 70% of range.
-- **Inside Bar** — Current candle fully inside prior candle (high < prev high, low > prev low). Compression signal.
-
-**Key level strength scoring:**
-- Base: 40
-- Tested 3+ times: +25 | Tested 2 times: +12
-- Very recent (≤10 candles ago): +20 | Recent (≤30 candles): +10
-- Round number (0.01 / 0.005 / nearest 100 / 50): +15
-
-### Phase 2 — AI summary (`lib/ai/scanner.ts`)
-
-After all pairs are analysed by the rule engine, the full `PairAnalysisResult[]` is sent to Claude in a single call. Claude receives the pre-calculated data and writes:
-- `overallSummary` — 2–3 sentences on the broad market picture
-- `aiSummary` per pair — 2–3 sentences explaining what the rule engine found
-
-The system prompt explicitly forbids inventing prices, scores, or setups. Claude is an explainer, not an analyst.
-
-**To skip AI during testing** — set `AI_SKIP=true` in `.env.local`. The scan still runs the full rule engine and returns all structured data. AI summaries are left empty.
+The scanner status per contract is `IN_ZONE`, `APPROACHING` (within one hourly ATR of a zone) or `CLEAR`.
 
 ---
 
@@ -261,39 +224,24 @@ The grader evaluates: process quality, risk management, thesis clarity, emotiona
 
 ---
 
-## OANDA integration
-
-Two environment variables control which API is used:
-
-| `OANDA_ACCOUNT_TYPE` | Base URL |
-|---|---|
-| `practice` | `https://api-fxpractice.oanda.com` |
-| `live` | `https://api-fxtrade.oanda.com` |
-
-### Endpoints used
-
-| Purpose | OANDA endpoint |
-|---|---|
-| Account balance / NAV | `GET /v3/accounts/{id}/summary` |
-| Candle data | `GET /v3/instruments/{pair}/candles?granularity=H4&count=100&price=M` |
-| Place stop order | `POST /v3/accounts/{id}/orders` — type `STOP`, `GTC`, signed units |
-| Cancel order | `PUT /v3/accounts/{id}/orders/{id}/cancel` |
-| Open trades | `GET /v3/accounts/{id}/trades?state=OPEN` |
-| Closed trades | `GET /v3/accounts/{id}/trades?state=CLOSED` — used by close-check |
-
-The status dot in the sidebar polls `/api/agent/status` every 60 seconds. If OANDA returns a valid account summary, the dot goes green and shows the balance.
-
----
-
 ## API routes reference
 
 | Method | Path | Description |
 |---|---|---|
 | POST | `/api/auth/login` | Validates password, sets auth cookie |
 | POST | `/api/auth/logout` | Clears auth cookie |
-| GET | `/api/agent/status` | OANDA account ping — returns balance + connectivity |
-| GET | `/api/agent/signal` | Single-pair rule engine scan (Terminal panel). Accepts `?pair=EUR_USD`. No AI, no DB write. |
-| POST | `/api/signals/scan` | Multi-pair scan: rule engine → AI summaries (Signals page) |
+| GET | `/api/futures/scan` | Latest saved zones per symbol + credit used. Database only — never spends credit. |
+| POST | `/api/futures/scan` | Download new bars (cached) and recompute zones. Body `{ symbols?: string[], confirm?: boolean }`. Returns `409 { needsConfirm, estimate }` when the estimate is over `DATABENTO_MAX_COST_USD`. |
+| POST | `/api/backtest/data` | Download/caches the history a backtest needs. Body `{ symbol, days, confirm? }`. `409 needsConfirm` above the credit limit. |
+| POST | `/api/backtest/run` | Run the backtest on cached bars and save it. Body `{ symbol, days, params? }`. |
+| GET/POST | `/api/journal/accounts` | List / create trading accounts. `PATCH /api/journal/accounts/[id]` updates one. |
+| GET/POST/DELETE | `/api/journal/import` | Recent imports · import `{ accountId, files: [{ name, text or base64 }], dryRun? }` · `?id=` undo |
+| GET | `/api/journal/trades` | Closed trades `?account=&from=&to=` + accounts, playbooks, note days |
+| GET/PUT | `/api/journal/notes/[day]` | Daily notebook entry + that day's trades |
+| GET/POST | `/api/journal/playbooks` | Playbooks + latest backtest stats for linked setups · create/update |
+| PATCH | `/api/journal/[id]/review` | Playbook, rules followed, rating, setup, stop (recomputes R) |
+| GET | `/api/backtest` | Recent runs, or one full run with `?id=` |
+| GET | `/api/futures/status` | Sidebar/Settings status: key configured, last scan, data-through time, credit used |
 | GET | `/api/analytics/performance` | Win rate, R totals, equity curve, breakdown by pair/setup/source |
 | GET | `/api/journal` | List all journal entries |
 | POST | `/api/journal` | Create a new journal entry |
@@ -301,187 +249,57 @@ The status dot in the sidebar polls `/api/agent/status` every 60 seconds. If OAN
 | PATCH | `/api/journal/[id]` | Update entry (exit, review, tags) |
 | DELETE | `/api/journal/[id]` | Delete entry |
 | POST | `/api/journal/[id]/analyze` | AI grade a journal entry |
-| GET | `/api/oanda/account` | Full OANDA account summary |
 | GET | `/api/settings/env` | Returns `{KEY: true/false}` — never exposes values |
 | GET | `/api/settings/stats` | Journal win/loss stats + AI spend totals |
-| GET | `/api/agent/settings` | Load agent settings (creates defaults on first call) |
-| PATCH | `/api/agent/settings` | Update agent settings |
-| POST | `/api/agent/run` | Run the scanner, save candidates, send Telegram alerts. Checks session gate for scheduled runs. |
-| GET | `/api/agent/runs` | List recent agent runs |
-| GET | `/api/agent/candidates` | List recent signal candidates |
-| POST | `/api/agent/telegram/test` | Send test message to Telegram |
-| POST | `/api/agent/telegram/setup` | Register Telegram webhook URL |
-| POST | `/api/agent/telegram/webhook` | Receive Telegram button taps — Approve places OANDA stop order |
-| POST | `/api/agent/close-check` | Poll OANDA for closed trades, auto-close matching journal entries, send Telegram review prompt |
-| GET | `/api/market/prices` | Live OANDA mid prices for market page |
 
 ---
 
-## Agent system (Phase 1)
+## Backtester (`lib/backtest/`)
 
-The agent is a controlled scanner that finds setups, notifies you on Telegram, and waits for your decision. No trades are executed automatically in Phase 1.
+`runBacktest()` in `engine.ts` replays the strategy minute by minute with no look-ahead:
 
-### Modes
-
-| Mode | Behaviour |
+| Layer | Rule |
 |---|---|
-| `OFF` | Agent disabled. No scans. |
-| `ALERT_ONLY` | Scans and sends Telegram notifications. No approve/deny buttons. |
-| `APPROVAL_REQUIRED` | Sends alerts with Approve / Deny / Journal buttons. Approve places a GTC STOP order on OANDA and logs to journal. |
-| `DEMO_AUTO` | Not yet active. Reserved for future auto-trading without approval step. |
+| **1H — map** | Zones are rebuilt at each session open with `analyzeZones()` using only data that existed then. Bias: above the week's VAH with a higher 1H swing low → longs only; below VAL with a lower 1H swing high → shorts only; inside value → both directions, only at zones within ¼ hourly ATR of VAH/VAL; anything else → no trades. |
+| **15m — setup A** | A 15m close through a zone (two consecutive closes outside RTH when "2 closes at night" is on), then a retest within 4 bars. A close back through the far side cancels it. |
+| **15m — setup B** | A 15m wick through a zone that closes back inside → trade the other way within 2 bars. |
+| **5m — trigger** | Rejection candle at the zone (closes in the trade direction). Stop-entry 1 tick beyond it, working for 3 bars. Stop = beyond the zone, the candle (and for B the wick) by 2 ticks. Target = the near edge of the next zone. Skipped if reward < min R. |
+| **Fills** | 1-minute bars. Stop checked before target in the same bar; same-minute entry + stop counts as a loss. 1 tick slippage on stop orders; targets need a 1-tick trade-through. Commission per side is configurable. |
+| **Risk** | One position at a time per contract, stop for the day after N losses, no new entries after 15:30 CT, flat at 15:59 CT. |
+| **News** | Approximate fixed windows (CT): 07:25–07:45 weekdays, 12:55–13:45 on FOMC days, 09:25–09:45 Wednesdays for crude (`news.ts`). |
 
-### Risk engine (`lib/risk/engine.ts`)
+R is measured against the risk at the actual fill. `stats.ts` computes win rate, expectancy, profit factor, max drawdown in R and a per-slice breakdown.
 
-Global risk checks run before every scan. A failed check blocks the entire run and logs the reason to `agent_runs.error`.
+**Bias check:** on a pure random walk (no edge in the data) the engine returns about −0.1R per trade over 1,200+ trades — what fees and slippage alone should cost. A clearly positive result on random data would mean a look-ahead bug. Truncating future data also leaves earlier trades unchanged.
 
-| Check | What it does |
-|---|---|
-| **Consecutive loss cooldown** | Queries last N closed journal entries. If all are `LOSS`, pauses scanning for `cooldown_hours`. Configurable threshold. Set to 0 to disable. |
-| **Volatility gate** (per pair) | Compares today's D1 range to the 14-day ADR. Skips pair if range > `max_adr_multiplier × avg` (news spike) or < 30% of avg (dead market). |
-
-Risk settings are stored in `agent_settings` and configurable from the Agent page:
-
-| Setting | Default | Description |
-|---|---|---|
-| `cooldown_after_losses` | 3 | Consecutive losses before cooldown. 0 = disabled |
-| `cooldown_hours` | 24 | Hours to pause after cooldown triggers |
-| `volatility_gate_enabled` | false | Enable/disable per-pair volatility check |
-| `max_adr_multiplier` | 2.5 | Skip pair if today's range > this × 14-day ADR |
-| `news_blackout_enabled` | false | Skip pairs when a high-impact Forex Factory event is imminent |
-| `news_blackout_minutes` | 60 | Minutes before/after event to block. Fetches FF XML feed per scan. |
-| `scan_sessions` | `[london, new_york]` | Which H4 sessions to scan when triggered by cron. Manual runs bypass this. |
-| `max_risk_per_trade_pct` | 0.01 | Risk per trade as a decimal (0.01 = 1%). Used for position sizing on approval. |
-
-### Scanner service (`lib/agent/scanner.ts`)
-
-`scanPairs(config)` handles:
-1. Parallel OANDA candle fetches for all pairs (H4 + D1)
-2. Per-pair volatility gate check (if enabled)
-3. `runFullPairAnalysis` for each passing pair
-
-Returns `{ analyses, skipped, errors }` — pairs that fail the volatility gate appear in `skipped` rather than errors.
-
-### Filters applied before alerting
-
-A candidate must pass all of the following to generate a Telegram alert:
-
-- Kill switch is off
-- Agent mode is not `OFF`
-- Daily approved trade count < `max_trades_per_day`
-- Global risk checks pass (consecutive loss cooldown)
-- `confidenceScore >= min_confidence_score` (default 75)
-- `tradeStatus` is `TRADE_READY` or `WATCHLIST` (not `NO_TRADE` or `AVOID`)
-- `riskReward >= min_risk_reward` (default 3.0)
-- Pair is in `allowed_pairs`
-- Per-pair volatility gate passes (if enabled)
-
-### Telegram setup
-
-1. Create a bot with @BotFather → get `TELEGRAM_BOT_TOKEN`
-2. Message @userinfobot → get your `TELEGRAM_CHAT_ID`
-3. Add `TELEGRAM_BOT_TOKEN` to Vercel env vars
-4. Set your Chat ID in Agent settings and save
-5. Deploy, then click "Register Webhook" on the Agent page
-
-### Telegram alert format
-
-```
-KINOE Agent — Setup Found
-
-XAU/USD SHORT
-Score: 82 · RR: 3.2:1
-Status: TRADE_READY
-Setup: Bearish Kangaroo Tail
-
-Entry: 2,345.00
-SL: 2,380.00
-TP: 2,240.00
-
-Trigger:
-• H4 close below KT low
-
-Blockers: None
-```
-
-Buttons: `✅ Approve` | `❌ Deny` | `📓 Journal Only`
-
-Tapping **Approve**:
-1. Fetches live OANDA account balance
-2. Calculates position size: `units = floor((balance × 1%) / |entry - SL|)`
-3. Places a GTC STOP order on OANDA (fills when price hits entry level)
-4. Creates a `journal_entry` with `source = 'agent'`
-5. Creates an `agent_order` row linking the candidate, journal entry, and OANDA order ID
-6. Edits the Telegram message to show order ID and units placed (or error detail)
-
-Tapping **Journal Only** creates the journal entry but skips OANDA execution.
-Tapping **Deny** records the decision only — no journal entry, no order.
-Manual entries on the journal page use `source = 'kierra'`.
-
-### New database tables
-
-| Table | Purpose |
-|---|---|
-| `agent_settings` | Single-row config: mode, filters, Telegram chat ID |
-| `agent_runs` | One row per scan — how many pairs, candidates, errors |
-| `agent_candidates` | Every setup the agent evaluated, with its decision |
-| `agent_decisions` | Audit trail for approve/deny actions |
-| `agent_orders` | One row per approved trade — stores OANDA trade ID, open/close prices, P&L; polled by close-check |
-| `notification_subscriptions` | Telegram chat IDs / web push endpoints |
-
-### Trade auto-close tracking
-
-When a trade is approved via Telegram:
-1. A `journal_entry` is created with `source = 'agent'`, `outcome = 'OPEN'`
-2. An `agent_order` row is created linking the candidate to the journal entry
-3. `POST /api/agent/close-check` polls OANDA for recently closed trades on the same pair
-
-**Matching logic** — finds a closed OANDA trade where:
-- Same instrument (pair)
-- Same direction (positive units = LONG, negative = SHORT)
-- OANDA `openTime` is within 6 hours of the journal `entered_at`
-
-When a match is found:
-- `agent_order` is marked `CLOSED` with close price, realised P&L, and OANDA trade ID
-- `journal_entry` is updated: `exit_price`, `pnl`, `r_multiple`, `outcome` (WIN/LOSS/BE), `exited_at`
-- Telegram sends a review prompt: *"EUR/USD LONG closed WIN +2.1R — Why did you approve this trade?"*
-
-**To run close-check automatically**, add it to your cron:
-```
-POST https://your-app.vercel.app/api/agent/close-check
-```
-Or call it alongside `/api/agent/run` — it's a quick poll with no AI cost.
-
-**For Kierra-suggested trades** (manual journal entries), close tracking is not automatic. Update the exit manually via the journal entry edit page, then use "Grade with AI" to trigger the reflection flow.
+**Data:** the first run per contract downloads 1-minute history for the window (+10 days warm-up) and 1-hour history (+160 days), priced first with `metadata.get_cost` and gated by `DATABENTO_MAX_COST_USD`. Runs themselves read only the cache.
 
 ---
 
-### Scan sessions
+## Journal import (`lib/journal/`)
 
-The agent checks which trading session a scheduled run falls in and skips if no enabled session matches the current UTC hour. H4 candles close every 4 hours — scanning more often than that is pointless.
-
-| Session | H4 close hours (UTC) |
+| File | Responsibility |
 |---|---|
-| Asian | 00:00, 04:00 |
-| London | 08:00, 12:00 |
-| New York | 12:00, 16:00, 20:00 |
+| `pdf.ts` | Tradovate **Performance PDF** → pair rows (unpdf text extraction, row regex) + the report's Gross P/L, fees and trade count |
+| `import.ts` | CSV parsing; Tradovate **Performance CSV** → pair rows; **Orders/fills CSV** → FIFO round trips + initial stop (from stop orders) |
+| `ingest.ts` | Multi-file uploads: merges overlapping exports (each distinct row keeps its highest count in any one file — identical fills can be real), then builds trades once |
+| `store.ts` | Accounts, imports (dedupe by `import_hash`), trades, notes, playbooks, review updates |
+| `stats.ts` | Summary, daily P&L, Kinoe score, breakdowns, prop-firm status |
+| `time.ts` / `contracts.ts` / `format.ts` | Timezone parsing, CME trading day, contract point values, display formatting |
 
-Defaults to London + New York. Configurable on the Agent page. Manual "Run Scan Now" always runs regardless of session filter.
+- Pair rows are rebuilt into fills and grouped **flat-to-flat** per symbol, so scale-ins/outs become one trade. Trade count is lower than Tradovate's row count.
+- P&L is recomputed from prices × point value and cross-checked against the file's own P&L; the import preview shows a ✓ per file when it matches the report.
+- PDF reports state total fees only: they're spread per contract and rounded cumulatively so the cents add up to the report total exactly. CSV imports use the account's fee rates (editable; changing them re-prices that account's CSV trades).
+- Timestamps are read in the account's timezone (default America/Chicago). Trading day = CME session (17:00 CT rolls to the next day; weekend sessions to Monday) — matches how prop firms count days.
+- Prop status is from closed trades: EOD trailing floor = max(start − DD, highest EOD balance − DD). Firm-specific trail locks aren't modelled.
 
-### Scheduled scanning
+---
 
-Two cron jobs on cron-job.org (free):
+## Removed in the futures switch
 
-**Job 1 — Agent Scanner**
-- URL: `https://kinoe.dev/api/agent/run`
-- Method: `POST`
-- Schedule: `0 0,4,8,12,16,20 * * *` (every H4 close)
+The forex agent (OANDA candles, Naked Forex pattern engine, Telegram approve/deny, OANDA stop orders, close-check) was removed. `/signals` and `/agent` redirect to `/scanner`.
 
-**Job 2 — Trade Close Check**
-- URL: `https://kinoe.dev/api/agent/close-check`
-- Method: `POST`
-- Schedule: every 15 minutes
-
-The session filter in the agent run route handles skipping runs outside enabled sessions — no need to restrict the cron schedule itself.
+If cron jobs still call `/api/agent/run` or `/api/agent/close-check`, disable them — those routes no longer exist (and are no longer public).
 
 ---
 
@@ -491,85 +309,43 @@ The session filter in the agent run route handles skipping runs outside enabled 
 kinoe-web/
 ├── app/
 │   ├── api/
-│   │   ├── agent/run/            # POST — scanner + risk checks + session gate + Telegram alerts
-│   │   ├── agent/signal/         # GET — single-pair rule scan for Terminal panel
-│   │   ├── agent/settings/       # GET/PATCH agent settings
-│   │   ├── agent/runs/           # GET recent runs
-│   │   ├── agent/candidates/     # GET recent candidates
-│   │   ├── agent/close-check/    # POST — poll OANDA for closed trades, auto-close journal entries
-│   │   ├── agent/status/         # OANDA connectivity check
-│   │   ├── agent/telegram/       # test, setup, webhook (approve → OANDA order)
 │   │   ├── analytics/performance/ # GET — win rate, equity curve, R stats
 │   │   ├── auth/                 # Login / logout
+│   │   ├── backtest/             # GET runs · data/ download history · run/ run + save
+│   │   ├── futures/scan/         # GET saved zones · POST run a scan
+│   │   ├── futures/status/       # Databento status + credit used
 │   │   ├── journal/              # CRUD + AI grader
-│   │   ├── market/prices/        # Live OANDA prices for market page
-│   │   ├── oanda/account/        # Account summary
-│   │   ├── settings/             # Env health + spend stats
-│   │   └── signals/scan/         # Full market scan (signals page)
-│   ├── agent/page.tsx            # Agent Control Center — settings, runs, candidates
-│   ├── analytics/page.tsx        # Performance analytics — equity curve, win rate, breakdowns
-│   ├── charts/page.tsx           # Full-screen TradingView chart
-│   ├── journal/                  # List, new entry, single entry pages
+│   │   └── settings/             # Env health + spend stats
+│   ├── backtest/page.tsx         # Backtest UI — controls, stats, equity curve, trades
+│   ├── charts/page.tsx           # Full-screen TradingView chart (futures switcher, deep links)
+│   ├── journal/                  # Dashboard, trades, reports, playbooks, day/[date] notebook, import, accounts, [id] trade, new
 │   ├── login/page.tsx            # Password login
-│   ├── market/page.tsx           # Session timeline, live prices, TradingView widgets
+│   ├── market/page.tsx           # Sessions, futures quotes, calendar, news
+│   ├── scanner/page.tsx          # Zone scanner UI
 │   ├── settings/page.tsx         # Settings dashboard
-│   ├── signals/page.tsx          # Market scan UI
 │   ├── terminal/page.tsx         # Home dashboard
 │   ├── layout.tsx                # Root layout (includes BottomNav globally)
-│   └── page.tsx                  # Redirects to /terminal
+│   └── page.tsx                  # Home
 │
 ├── components/
 │   ├── BottomNav.tsx             # Mobile bottom navigation (md:hidden)
 │   ├── ChartPanel.tsx            # TradingView widget (Terminal page)
-│   ├── Sidebar.tsx               # Nav + OANDA status dot (hidden on mobile)
-│   ├── SignalPanel.tsx           # Single-pair KT signal card
+│   ├── ScannerPanel.tsx          # Compact zone scanner (Terminal page)
+│   ├── Sidebar.tsx               # Nav + Databento status
 │   └── Topbar.tsx                # Page header + Market Pulse dropdown
 │
 ├── lib/
-│   ├── agent/
-│   │   └── scanner.ts            # Fetch candles, run analysis, volatility gate, session filter
-│   ├── broker/
-│   │   └── sizing.ts             # Position sizing: units = (balance × riskPct) / |entry - SL|
-│   ├── oanda/
-│   │   ├── account.ts            # Fetch open/closed OANDA trades, account balance/NAV
-│   │   └── orders.ts             # placeStopOrder, cancelOrder — GTC STOP entry orders
-│   ├── risk/
-│   │   ├── engine.ts             # Global + per-pair risk checks (cooldown, volatility gate)
-│   │   └── news.ts               # News blackout — Forex Factory XML feed parser
-│   ├── ai/
-│   │   ├── anthropic.ts          # Anthropic client wrapper
-│   │   ├── grader.ts             # Journal grading logic (Anthropic or OpenAI)
-│   │   ├── openai.ts             # OpenAI fallback for journal grading
-│   │   ├── pricing.ts            # Token cost calculator
-│   │   ├── prompts.ts            # Shared prompt templates
-│   │   ├── scanner.ts            # Signal summariser (summary-only)
-│   │   └── types.ts              # Shared AI types
-│   ├── db/
-│   │   ├── client.ts             # Neon SQL client
-│   │   ├── migrate.ts            # Migration runner (CLI)
-│   │   ├── queries.ts            # All database queries
-│   │   ├── schema.sql            # Table definitions (idempotent)
-│   │   └── types.ts              # TypeScript types for DB rows
-│   ├── risk/
-│   │   └── engine.ts             # Global + per-pair risk checks
-│   ├── signals/
-│   │   ├── bias.ts               # getTrendBias, getHigherTimeframeBias
-│   │   ├── candles.ts            # parseCandles, OandaCandle / ParsedCandle types
-│   │   ├── confidence.ts         # Weighted scoring, ConfidenceBreakdown, blockers
-│   │   ├── detection.ts          # Orchestrator — exports runFullPairAnalysis
-│   │   ├── levels.ts             # Key levels, market state, ADR calculation
-│   │   ├── m15.ts                # M15 precision entry drill-down (runs on TRADE_READY pairs)
-│   │   ├── patterns.ts           # KT, Big Shadow, Inside Bar detectors
-│   │   └── planner.ts            # TradePlan builder
+│   ├── backtest/                 # engine.ts (walk-forward sim), stats.ts, news.ts, data.ts
+│   ├── journal/                  # import (PDF/CSV), ingest, store, stats, time, contracts, format
+│   ├── ai/                       # Journal grader (Anthropic / OpenAI), pricing, prompts
+│   ├── db/                       # Neon client, migration runner, queries, schema, types
+│   ├── futures/                  # Databento client, bar cache, sessions, symbols, scanner
+│   ├── indicators/               # Volume profile + key-level zones engine
+│   ├── telegram.ts               # Telegram helper (kept for zone alerts)
 │   └── auth.ts                   # HMAC cookie sign/verify
 │
-├── public/
-│   ├── icon.svg                  # PWA app icon
-│   └── manifest.json             # PWA manifest
-│
 ├── proxy.ts                      # Auth middleware (Next.js 16 — must be named proxy.ts)
-├── next.config.ts
-├── tailwind.config.ts
+├── next.config.ts                # /signals and /agent redirect to /scanner
 └── package.json
 ```
 
@@ -602,23 +378,23 @@ The auth gate is in `proxy.ts` (not `middleware.ts`). Next.js 16 silently ignore
 
 | Change | Where |
 |---|---|
-| Different pairs | Edit `PAIRS` array in `app/api/signals/scan/route.ts` |
-| Different timeframe | Change `granularity=H4` in the OANDA fetch calls + update `runFullPairAnalysis` |
-| Different broker (not OANDA) | Swap the fetch calls in `lib/agent/scanner.ts`. `parseCandles()` in `lib/signals/candles.ts` expects `{complete, time, mid: {o,h,l,c}}` — adapt the parser to your broker's candle format. |
-| Add more patterns | Add detection functions in `lib/signals/patterns.ts`, wire into `runFullPairAnalysis` in `detection.ts`, update confidence scoring in `lib/signals/confidence.ts`. |
+| Different contracts | Add to `FUTURES_SYMBOLS` in `lib/futures/symbols.ts` (tick size + Databento continuous symbol + TradingView symbol) |
+| Zone rules | `lib/indicators/zones.ts` — base scores per level type, test lookback, zone width, 3–5 cap |
+| Different data vendor | Replace `lib/futures/databento.ts`; the cache and engine only need `Bar { ts, open, high, low, close, volume }` |
 | Multi-user | Replace the single-password auth with NextAuth or Clerk. The rest of the app is user-agnostic. |
 | Custom domain | Set in Vercel → Domains |
 
 ---
 
-## AI cost reference
-
-Approximate costs per action (claude-sonnet-4-6):
+## Cost reference
 
 | Action | Approx cost |
 |---|---|
-| 3-pair signal scan with summaries | ~$0.01 |
-| Journal entry AI grade | ~$0.01–0.05 |
-| Single-pair KT scan (Terminal page) | Free — no AI, rule engine only |
+| First futures scan (backfill ~5 months 1h + ~10 days 1m, 4 contracts) | Estimated before downloading; shown on the Scanner page |
+| Later scans | Only new bars since the last scan — usually cents of Databento credit |
+| Loading the Scanner / Terminal | Free — reads saved snapshots |
+| First backtest per contract | 1-minute history for the window — estimated and confirmed on the Backtest page before downloading |
+| Re-running a backtest | Free — reads the cache |
+| Journal entry AI grade (claude-sonnet-4-6) | ~$0.01–0.05 |
 
-Scan cost is shown live in the Signals page top bar after each scan. All-time AI spend is shown in Settings.
+Databento credit used and all-time AI spend are shown in Settings.

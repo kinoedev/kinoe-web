@@ -6,7 +6,7 @@ import Sidebar from "@/components/Sidebar";
 import Topbar from "@/components/Topbar";
 import type { Direction, NewJournalEntry } from "@/lib/db/types";
 
-const PAIRS = ["EUR_USD", "GBP_USD", "USD_JPY", "AUD_USD", "USD_CAD", "XAU_USD"];
+const PAIRS = ["MNQ", "MES", "MGC", "MCL", "NQ", "ES", "M2K"];
 const TIMEFRAMES = ["M15", "H1", "H4", "D"];
 const SETUPS = ["Kangaroo Tail", "Big Shadow", "Breakout", "Reversal", "Other"];
 
@@ -15,8 +15,8 @@ export default function NewJournalEntryPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [pair, setPair] = useState("EUR_USD");
-  const [timeframe, setTimeframe] = useState("H4");
+  const [pair, setPair] = useState("MNQ");
+  const [timeframe, setTimeframe] = useState("M15");
   const [direction, setDirection] = useState<Direction>("LONG");
   const [setupType, setSetupType] = useState("Kangaroo Tail");
   const [entryPrice, setEntryPrice] = useState("");
@@ -87,7 +87,7 @@ export default function NewJournalEntryPage() {
       <div className="relative flex min-h-screen">
         <Sidebar />
 
-        <main className="flex-1">
+        <main className="min-w-0 flex-1">
           <Topbar />
 
           <form onSubmit={onSubmit} className="p-4 pb-24 md:p-6 md:pb-8">
