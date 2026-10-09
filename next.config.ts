@@ -5,6 +5,7 @@ const nextConfig: NextConfig = {
     return [
       { source: "/signals", destination: "/scanner", permanent: false },
       { source: "/agent", destination: "/scanner", permanent: false },
+      { source: "/analytics", destination: "/journal/reports", permanent: false },
     ];
   },
 };

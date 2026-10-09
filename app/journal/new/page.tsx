@@ -87,7 +87,7 @@ export default function NewJournalEntryPage() {
       <div className="relative flex min-h-screen">
         <Sidebar />
 
-        <main className="flex-1">
+        <main className="min-w-0 flex-1">
           <Topbar />
 
           <form onSubmit={onSubmit} className="p-4 pb-24 md:p-6 md:pb-8">

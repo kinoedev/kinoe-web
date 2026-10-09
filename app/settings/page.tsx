@@ -110,7 +110,7 @@ export default function SettingsPage() {
       <div className="relative flex min-h-screen">
         <Sidebar />
 
-        <main className="flex-1">
+        <main className="min-w-0 flex-1">
           <Topbar />
 
           <div className="p-4 pb-24 space-y-5 max-w-4xl md:p-6 md:pb-8">

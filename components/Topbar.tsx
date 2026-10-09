@@ -9,6 +9,12 @@ const PAGE_META: Record<string, { title: string; sub: string }> = {
   "/charts":    { title: "Charts",    sub: "Advanced Charting" },
   "/scanner":   { title: "Scanner",   sub: "Futures Key-Level Zones" },
   "/backtest":  { title: "Backtest",  sub: "1H · 15m · 5m Zone Strategy" },
+  "/journal/trades":    { title: "Journal",   sub: "All Trades" },
+  "/journal/reports":   { title: "Journal",   sub: "Reports" },
+  "/journal/playbooks": { title: "Journal",   sub: "Playbooks" },
+  "/journal/day":       { title: "Journal",   sub: "Daily Notebook" },
+  "/journal/import":    { title: "Journal",   sub: "Import Trades" },
+  "/journal/accounts":  { title: "Journal",   sub: "Accounts" },
   "/journal":   { title: "Journal",   sub: "Trade Log & Grader" },
   "/market":    { title: "Market",    sub: "Sessions, Quotes & Calendar" },
   "/settings":  { title: "Settings",  sub: "Configuration" },
@@ -43,7 +49,10 @@ function timeUntil(s: SessionDef, utcH: number, utcM: number): string {
 
 export default function Topbar() {
   const pathname = usePathname();
-  const meta = PAGE_META[pathname] ?? { title: "KINOE", sub: "" };
+  const metaKey = Object.keys(PAGE_META)
+    .filter((k) => pathname === k || pathname.startsWith(k + "/"))
+    .sort((a, b) => b.length - a.length)[0];
+  const meta = (metaKey && PAGE_META[metaKey]) || { title: "KINOE", sub: "" };
 
   const [open, setOpen] = useState(false);
   const [now, setNow] = useState(new Date());

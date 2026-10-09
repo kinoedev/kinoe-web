@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Sidebar from "@/components/Sidebar";
 import Topbar from "@/components/Topbar";
 import type { JournalEntry, Outcome, UpdateJournalEntry } from "@/lib/db/types";
+import { TradeReview, TradeSummary } from "@/components/journal/TradeReview";
 
 const OUTCOMES: Outcome[] = ["OPEN", "WIN", "LOSS", "BE", "CANCELLED"];
 
@@ -113,7 +114,7 @@ export default function JournalEntryPage({
   async function onDelete() {
     if (!confirm("Delete this entry permanently?")) return;
     const res = await fetch(`/api/journal/${id}`, { method: "DELETE" });
-    if (res.ok) router.replace("/journal");
+    if (res.ok) router.replace("/journal/trades");
   }
 
   return (
@@ -126,7 +127,7 @@ export default function JournalEntryPage({
       <div className="relative flex min-h-screen">
         <Sidebar />
 
-        <main className="flex-1">
+        <main className="min-w-0 flex-1">
           <Topbar />
 
           <div className="p-4 pb-24 md:p-6 md:pb-8">
@@ -143,10 +144,12 @@ export default function JournalEntryPage({
                 <div className="flex items-center justify-between">
                   <div>
                     <div className="text-sm text-white/80">
-                      {entry.pair} · {entry.timeframe} · {entry.direction}
+                      {entry.pair} · {entry.source === "import" ? `×${Number(entry.quantity ?? 0)}` : entry.timeframe} · {entry.direction}
                     </div>
                     <div className="mt-1 text-xs text-white/40">
-                      {entry.setup_type ?? "No setup type"} · Created {new Date(entry.created_at).toLocaleString()}
+                      {entry.source === "import"
+                        ? `${entry.entered_at ? new Date(entry.entered_at).toLocaleString("en-US", { timeZone: "America/Chicago" }) : ""} → ${entry.exited_at ? new Date(entry.exited_at).toLocaleString("en-US", { timeZone: "America/Chicago", timeStyle: "medium" }) : ""} CT · trading day ${String(entry.trading_day ?? "").slice(0, 10)}`
+                        : `${entry.setup_type ?? "No setup type"} · Created ${new Date(entry.created_at).toLocaleString()}`}
                     </div>
                   </div>
                   <button
@@ -157,10 +160,13 @@ export default function JournalEntryPage({
                   </button>
                 </div>
 
+                {entry.source === "import" ? <TradeSummary entry={entry} /> : null}
+                <TradeReview entry={entry} onChange={setEntry} />
+
                 <div className="mt-6 grid gap-3 md:grid-cols-4">
-                  <ReadCard label="Entry" value={entry.entry_price !== null ? String(entry.entry_price) : "—"} />
-                  <ReadCard label="Stop loss" value={entry.stop_loss !== null ? String(entry.stop_loss) : "—"} />
-                  <ReadCard label="Take profit" value={entry.take_profit !== null ? String(entry.take_profit) : "—"} />
+                  <ReadCard label="Entry" value={entry.entry_price !== null ? String(Number(entry.entry_price)) : "—"} />
+                  <ReadCard label="Stop loss" value={entry.stop_loss !== null ? String(Number(entry.stop_loss)) : "—"} />
+                  <ReadCard label="Take profit" value={entry.take_profit !== null ? String(Number(entry.take_profit)) : "—"} />
                   <ReadCard
                     label="R:R"
                     value={entry.risk_reward !== null ? `${entry.risk_reward}:1` : "—"}
@@ -183,7 +189,7 @@ export default function JournalEntryPage({
                     Set the outcome and write what you learned. This is what trains the agent.
                   </div>
 
-                  <div className="mt-4 grid gap-4 md:grid-cols-3">
+                  <div className={`mt-4 grid gap-4 md:grid-cols-3 ${entry.source === "import" ? "hidden" : ""}`}>
                     <Field label="Outcome">
                       <select
                         value={outcome}
@@ -292,7 +298,7 @@ export default function JournalEntryPage({
                       </div>
 
                       {analyzeMeta ? (
-                        <div className="grid gap-3 md:grid-cols-2">
+                        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                           <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-3">
                             <div className="text-xs text-emerald-200">Strengths</div>
                             <ul className="mt-2 space-y-1.5 text-xs leading-5 text-white/70">

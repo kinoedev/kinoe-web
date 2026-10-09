@@ -38,7 +38,6 @@ export default function Sidebar() {
     { label: "Scanner", href: "/scanner" },
     { label: "Backtest", href: "/backtest" },
     { label: "Journal", href: "/journal" },
-    { label: "Analytics", href: "/analytics" },
     { label: "Market", href: "/market" },
     { label: "Settings", href: "/settings" },
   ];
@@ -52,7 +51,7 @@ export default function Sidebar() {
 
       <nav className="px-3">
         {navItems.map((item) => {
-          const active = pathname === item.href;
+          const active = pathname === item.href || pathname.startsWith(item.href + "/");
           return (
             <Link
               key={item.href}

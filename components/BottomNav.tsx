@@ -37,8 +37,8 @@ const NAV = [
     ),
   },
   {
-    href: "/analytics",
-    label: "Analytics",
+    href: "/journal/reports",
+    label: "Reports",
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
         <line x1="18" y1="20" x2="18" y2="10"/>
