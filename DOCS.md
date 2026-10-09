@@ -11,6 +11,7 @@ A private trading platform for futures price action. Scans MNQ, MES, MGC and MCL
 | **Terminal** | Home dashboard — TradingView chart (15m default, Chicago time) + compact zone scanner showing which contract is nearest a level |
 | **Charts** | Full-screen TradingView Advanced Chart with a futures quick switcher. Accepts `?symbol=CME_MINI:MNQ1!` deep links from the scanner. |
 | **Scanner** | Futures key-level zone scanner. Pulls CME data from Databento (cached), builds the weekly level set and 3–5 rectangle zones per contract, and ranks contracts by how close price is to a zone. |
+| **Backtest** | Walk-forward backtest of the 1H / 15m / 5m zone strategy (setups A and B) on cached CME 1-minute data. Win rate, expectancy, drawdown, equity curve, and a breakdown by setup, session, direction and contract. |
 | **Journal** | Manual trade entries. AI grades each entry on process, risk, and thesis quality. |
 | **Analytics** | Win rate, profit factor, equity curve, breakdown by symbol/setup/source. |
 | **Market** | Session timeline, TradingView futures quotes, USD economic calendar, futures news. |
@@ -57,6 +58,7 @@ Set all of these in Vercel → Project → Settings → Environment Variables (a
 | `SITE_AUTH_SECRET` | ✅ | Secret for signing auth cookies. Generate with `openssl rand -hex 32`. |
 | `DATABASE_URL` | ✅ | Neon Postgres connection string (pooled). Starts with `postgresql://`. |
 | `DATABENTO_API_KEY` | ✅ | Databento API key. Used for historical CME bars. |
+| `BACKTEST_MAX_DAYS` | ⬜ | Longest backtest window in days (default `90`). 1-minute bars are kept for this many days + 15. |
 | `DATABENTO_MAX_COST_USD` | ⬜ | Per-scan credit limit (default `1`). A scan estimated above this asks for confirmation on the Scanner page before spending. |
 | `ANTHROPIC_API_KEY` | ✅ | Anthropic API key for signal summaries and journal grading. |
 | `OPENAI_API_KEY` | ⬜ | OpenAI API key. Only needed if you want to grade journal entries with GPT. |
@@ -147,6 +149,8 @@ The script is idempotent — every `CREATE` uses `IF NOT EXISTS`. Safe to re-run
 
 **`futures_zone_snapshots`** — one row per symbol per scan with the full zone analysis (JSONB). The Scanner page loads the latest snapshot without calling Databento.
 
+**`backtests`** — one row per backtest run per contract: window, params, every trade (`trades_jsonb`), and stats/breakdown/skip counts (`results_jsonb`).
+
 The forex-era `agent_*` tables are left in place (not dropped) so historic data is kept; nothing writes to them any more.
 
 **`ai_analyses`** — audit log of every AI call. Stores prompt, response, token counts, and cost. Used by Settings page to show all-time AI spend. Will feed bot training data later.
@@ -219,6 +223,9 @@ The grader evaluates: process quality, risk management, thesis clarity, emotiona
 | POST | `/api/auth/logout` | Clears auth cookie |
 | GET | `/api/futures/scan` | Latest saved zones per symbol + credit used. Database only — never spends credit. |
 | POST | `/api/futures/scan` | Download new bars (cached) and recompute zones. Body `{ symbols?: string[], confirm?: boolean }`. Returns `409 { needsConfirm, estimate }` when the estimate is over `DATABENTO_MAX_COST_USD`. |
+| POST | `/api/backtest/data` | Download/caches the history a backtest needs. Body `{ symbol, days, confirm? }`. `409 needsConfirm` above the credit limit. |
+| POST | `/api/backtest/run` | Run the backtest on cached bars and save it. Body `{ symbol, days, params? }`. |
+| GET | `/api/backtest` | Recent runs, or one full run with `?id=` |
 | GET | `/api/futures/status` | Sidebar/Settings status: key configured, last scan, data-through time, credit used |
 | GET | `/api/analytics/performance` | Win rate, R totals, equity curve, breakdown by pair/setup/source |
 | GET | `/api/journal` | List all journal entries |
@@ -229,6 +236,28 @@ The grader evaluates: process quality, risk management, thesis clarity, emotiona
 | POST | `/api/journal/[id]/analyze` | AI grade a journal entry |
 | GET | `/api/settings/env` | Returns `{KEY: true/false}` — never exposes values |
 | GET | `/api/settings/stats` | Journal win/loss stats + AI spend totals |
+
+---
+
+## Backtester (`lib/backtest/`)
+
+`runBacktest()` in `engine.ts` replays the strategy minute by minute with no look-ahead:
+
+| Layer | Rule |
+|---|---|
+| **1H — map** | Zones are rebuilt at each session open with `analyzeZones()` using only data that existed then. Bias: above the week's VAH with a higher 1H swing low → longs only; below VAL with a lower 1H swing high → shorts only; inside value → both directions, only at zones within ¼ hourly ATR of VAH/VAL; anything else → no trades. |
+| **15m — setup A** | A 15m close through a zone (two consecutive closes outside RTH when "2 closes at night" is on), then a retest within 4 bars. A close back through the far side cancels it. |
+| **15m — setup B** | A 15m wick through a zone that closes back inside → trade the other way within 2 bars. |
+| **5m — trigger** | Rejection candle at the zone (closes in the trade direction). Stop-entry 1 tick beyond it, working for 3 bars. Stop = beyond the zone, the candle (and for B the wick) by 2 ticks. Target = the near edge of the next zone. Skipped if reward < min R. |
+| **Fills** | 1-minute bars. Stop checked before target in the same bar; same-minute entry + stop counts as a loss. 1 tick slippage on stop orders; targets need a 1-tick trade-through. Commission per side is configurable. |
+| **Risk** | One position at a time per contract, stop for the day after N losses, no new entries after 15:30 CT, flat at 15:59 CT. |
+| **News** | Approximate fixed windows (CT): 07:25–07:45 weekdays, 12:55–13:45 on FOMC days, 09:25–09:45 Wednesdays for crude (`news.ts`). |
+
+R is measured against the risk at the actual fill. `stats.ts` computes win rate, expectancy, profit factor, max drawdown in R and a per-slice breakdown.
+
+**Bias check:** on a pure random walk (no edge in the data) the engine returns about −0.1R per trade over 1,200+ trades — what fees and slippage alone should cost. A clearly positive result on random data would mean a look-ahead bug. Truncating future data also leaves earlier trades unchanged.
+
+**Data:** the first run per contract downloads 1-minute history for the window (+10 days warm-up) and 1-hour history (+160 days), priced first with `metadata.get_cost` and gated by `DATABENTO_MAX_COST_USD`. Runs themselves read only the cache.
 
 ---
 
@@ -248,11 +277,13 @@ kinoe-web/
 │   ├── api/
 │   │   ├── analytics/performance/ # GET — win rate, equity curve, R stats
 │   │   ├── auth/                 # Login / logout
+│   │   ├── backtest/             # GET runs · data/ download history · run/ run + save
 │   │   ├── futures/scan/         # GET saved zones · POST run a scan
 │   │   ├── futures/status/       # Databento status + credit used
 │   │   ├── journal/              # CRUD + AI grader
 │   │   └── settings/             # Env health + spend stats
 │   ├── analytics/page.tsx        # Performance analytics
+│   ├── backtest/page.tsx         # Backtest UI — controls, stats, equity curve, trades
 │   ├── charts/page.tsx           # Full-screen TradingView chart (futures switcher, deep links)
 │   ├── journal/                  # List, new entry, single entry pages
 │   ├── login/page.tsx            # Password login
@@ -271,6 +302,7 @@ kinoe-web/
 │   └── Topbar.tsx                # Page header + Market Pulse dropdown
 │
 ├── lib/
+│   ├── backtest/                 # engine.ts (walk-forward sim), stats.ts, news.ts, data.ts
 │   ├── ai/                       # Journal grader (Anthropic / OpenAI), pricing, prompts
 │   ├── db/                       # Neon client, migration runner, queries, schema, types
 │   ├── futures/                  # Databento client, bar cache, sessions, symbols, scanner
@@ -327,6 +359,8 @@ The auth gate is in `proxy.ts` (not `middleware.ts`). Next.js 16 silently ignore
 | First futures scan (backfill ~5 months 1h + ~10 days 1m, 4 contracts) | Estimated before downloading; shown on the Scanner page |
 | Later scans | Only new bars since the last scan — usually cents of Databento credit |
 | Loading the Scanner / Terminal | Free — reads saved snapshots |
+| First backtest per contract | 1-minute history for the window — estimated and confirmed on the Backtest page before downloading |
+| Re-running a backtest | Free — reads the cache |
 | Journal entry AI grade (claude-sonnet-4-6) | ~$0.01–0.05 |
 
 Databento credit used and all-time AI spend are shown in Settings.

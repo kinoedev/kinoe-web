@@ -296,3 +296,6 @@ CREATE TABLE IF NOT EXISTS futures_zone_snapshots (
 );
 
 CREATE INDEX IF NOT EXISTS futures_zone_snapshots_symbol_idx ON futures_zone_snapshots(symbol, created_at DESC);
+
+-- Backtester: full results (stats, breakdowns, skips) per run
+ALTER TABLE backtests ADD COLUMN IF NOT EXISTS results_jsonb JSONB;

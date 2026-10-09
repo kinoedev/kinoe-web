@@ -129,3 +129,26 @@ export function atr(bars: Bar[], period = 14): number {
   const recent = trs.slice(-period);
   return recent.reduce((s, v) => s + v, 0) / recent.length;
 }
+
+const clockCache = new Map<number, { offsetMs: number }>();
+
+/**
+ * Chicago wall-clock for a timestamp: minutes since midnight and weekday (0 = Sunday).
+ * The UTC offset is memoised per hour, so this is cheap enough to call on every bar.
+ */
+export function chicagoClock(ms: number): { minutes: number; weekday: number; date: string } {
+  const hourKey = Math.floor(ms / 3_600_000);
+  let entry = clockCache.get(hourKey);
+  if (!entry) {
+    const p = chicagoParts(hourKey * 3_600_000);
+    const wallAsUtc = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute);
+    entry = { offsetMs: wallAsUtc - hourKey * 3_600_000 };
+    clockCache.set(hourKey, entry);
+  }
+  const wall = new Date(ms + entry.offsetMs);
+  return {
+    minutes: wall.getUTCHours() * 60 + wall.getUTCMinutes(),
+    weekday: wall.getUTCDay(),
+    date: wall.toISOString().slice(0, 10),
+  };
+}

@@ -36,6 +36,7 @@ export default function Sidebar() {
     { label: "Terminal", href: "/terminal" },
     { label: "Charts", href: "/charts" },
     { label: "Scanner", href: "/scanner" },
+    { label: "Backtest", href: "/backtest" },
     { label: "Journal", href: "/journal" },
     { label: "Analytics", href: "/analytics" },
     { label: "Market", href: "/market" },

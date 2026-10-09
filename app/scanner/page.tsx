@@ -65,6 +65,16 @@ function Ladder({ a }: { a: ZoneAnalysis }) {
   const top = hi + pad;
   const span = top - (lo - pad);
   const y = (p: number) => ((top - p) / span) * 100;
+  // Hide zone price labels that would collide with each other or with the last-price tag.
+  const showLabel = new Set<Zone>();
+  let lastY = -100;
+  for (const z of [...a.zones].sort((m, n) => n.price - m.price)) {
+    const zy = (y(z.top) + y(z.bottom)) / 2;
+    if (zy - lastY >= 7 && Math.abs(zy - y(a.lastPrice)) >= 6) {
+      showLabel.add(z);
+      lastY = zy;
+    }
+  }
 
   return (
     <div className="relative h-56 w-full overflow-hidden rounded-xl border border-white/10 bg-black/40">
@@ -76,9 +86,11 @@ function Ladder({ a }: { a: ZoneAnalysis }) {
           }`}
           style={{ top: `${y(z.top)}%`, height: `${Math.max(1.2, y(z.bottom) - y(z.top))}%` }}
         >
-          <span className="absolute right-2 top-1/2 -translate-y-1/2 font-mono text-[9px] text-white/50">
-            {formatPrice(z.price, tick)}
-          </span>
+          {showLabel.has(z) ? (
+            <span className="absolute right-2 top-1/2 -translate-y-1/2 font-mono text-[9px] text-white/50">
+              {formatPrice(z.price, tick)}
+            </span>
+          ) : null}
         </div>
       ))}
       <div className="absolute left-0 right-0 border-t border-dashed border-white/70" style={{ top: `${y(a.lastPrice)}%` }}>

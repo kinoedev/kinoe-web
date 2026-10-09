@@ -12,8 +12,18 @@ export const LOOKBACK_DAYS: Record<BarSchema, number> = {
   "ohlcv-1m": 10, // the last two weeks of 1m bars for the volume profile
 };
 
-const MINUTE_RETENTION_DAYS = 30;
 const DAY_MS = 86_400_000;
+
+/** Longest backtest window allowed, in days of 1-minute history. */
+export function backtestMaxDays(): number {
+  const n = Number(process.env.BACKTEST_MAX_DAYS);
+  return Number.isFinite(n) && n >= 10 ? Math.floor(n) : 90;
+}
+
+/** 1m bars are kept long enough for the longest backtest (plus a week of warm-up for the profile). */
+function minuteRetentionDays(): number {
+  return Math.max(30, backtestMaxDays() + 15);
+}
 
 type Coverage = { covered_from: string; covered_until: string };
 
@@ -33,7 +43,10 @@ async function getCoverage(symbol: string, schema: BarSchema): Promise<Coverage 
 }
 
 /** Work out which ranges still need downloading, and what they will cost. */
-export async function planFetches(symbols: FuturesSymbol[]): Promise<{ plans: FetchPlan[]; availableEnd: Record<BarSchema, Date> }> {
+export async function planFetches(
+  symbols: FuturesSymbol[],
+  lookbackDays: Record<BarSchema, number> = LOOKBACK_DAYS
+): Promise<{ plans: FetchPlan[]; availableEnd: Record<BarSchema, Date> }> {
   const schemas: BarSchema[] = ["ohlcv-1h", "ohlcv-1m"];
   const availableEnd = {} as Record<BarSchema, Date>;
   for (const schema of schemas) {
@@ -46,7 +59,7 @@ export async function planFetches(symbols: FuturesSymbol[]): Promise<{ plans: Fe
   for (const symbol of symbols) {
     for (const schema of schemas) {
       const end = availableEnd[schema];
-      const desiredStart = new Date(end.getTime() - LOOKBACK_DAYS[schema] * DAY_MS);
+      const desiredStart = new Date(end.getTime() - lookbackDays[schema] * DAY_MS);
       const cov = await getCoverage(symbol.root, schema);
       const ranges: [Date, Date][] = [];
       if (!cov) {
@@ -115,7 +128,7 @@ export async function executeFetch(plan: FetchPlan): Promise<number> {
 }
 
 export async function pruneMinuteBars() {
-  const cutoff = new Date(Date.now() - MINUTE_RETENTION_DAYS * DAY_MS).toISOString();
+  const cutoff = new Date(Date.now() - minuteRetentionDays() * DAY_MS).toISOString();
   await sql`DELETE FROM futures_bars WHERE schema = 'ohlcv-1m' AND ts < ${cutoff}`;
   await sql`
     UPDATE futures_coverage SET covered_from = GREATEST(covered_from, ${cutoff}::timestamptz)
@@ -126,20 +139,35 @@ export async function pruneMinuteBars() {
 type BarRow = { ts: string; open: number; high: number; low: number; close: number; volume: string | number };
 
 export async function loadBars(symbol: string, schema: BarSchema, sinceDays: number): Promise<Bar[]> {
-  const since = new Date(Date.now() - sinceDays * DAY_MS).toISOString();
-  const rows = (await sql`
-    SELECT ts, open, high, low, close, volume FROM futures_bars
-    WHERE symbol = ${symbol} AND schema = ${schema} AND ts >= ${since}
-    ORDER BY ts
-  `) as BarRow[];
-  return rows.map((r) => ({
+  return loadBarsRange(symbol, schema, Date.now() - sinceDays * DAY_MS, Date.now() + DAY_MS);
+}
+
+/** Load bars in [from, to). Large ranges are read in slices to keep each HTTP response small. */
+export async function loadBarsRange(symbol: string, schema: BarSchema, from: number, to: number): Promise<Bar[]> {
+  const slice = schema === "ohlcv-1m" ? 10 * DAY_MS : 400 * DAY_MS;
+  const out: Bar[] = [];
+  for (let start = from; start < to; start += slice) {
+    const end = Math.min(to, start + slice);
+    const rows = (await sql`
+      SELECT ts, open, high, low, close, volume FROM futures_bars
+      WHERE symbol = ${symbol} AND schema = ${schema}
+        AND ts >= ${new Date(start).toISOString()} AND ts < ${new Date(end).toISOString()}
+      ORDER BY ts
+    `) as BarRow[];
+    out.push(...rows.map(toBar));
+  }
+  return out;
+}
+
+function toBar(r: BarRow): Bar {
+  return {
     ts: new Date(r.ts).getTime(),
     open: Number(r.open),
     high: Number(r.high),
     low: Number(r.low),
     close: Number(r.close),
     volume: Number(r.volume),
-  }));
+  };
 }
 
 export async function creditSpent(): Promise<{ total: number; last30d: number; pulls: number }> {
