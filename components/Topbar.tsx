@@ -7,10 +7,9 @@ import { useEffect, useRef, useState } from "react";
 const PAGE_META: Record<string, { title: string; sub: string }> = {
   "/terminal":  { title: "Terminal",  sub: "Market Intelligence Desk" },
   "/charts":    { title: "Charts",    sub: "Advanced Charting" },
-  "/signals":   { title: "Signals",   sub: "Rule-Based Scanner" },
+  "/scanner":   { title: "Scanner",   sub: "Futures Key-Level Zones" },
   "/journal":   { title: "Journal",   sub: "Trade Log & Grader" },
-  "/agent":     { title: "Agent",     sub: "Autonomous Scanner" },
-  "/market":    { title: "Market",    sub: "Live Prices & Calendar" },
+  "/market":    { title: "Market",    sub: "Sessions, Quotes & Calendar" },
   "/settings":  { title: "Settings",  sub: "Configuration" },
 };
 

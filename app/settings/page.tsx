@@ -4,17 +4,14 @@ import { useEffect, useState } from "react";
 import Sidebar from "@/components/Sidebar";
 import Topbar from "@/components/Topbar";
 
-type OandaSummary = {
-  account?: {
-    currency?: string;
-    balance?: string;
-    NAV?: string;
-    unrealizedPL?: string;
-    openTradeCount?: number;
-    openPositionCount?: number;
-    alias?: string;
-    id?: string;
-  };
+type FuturesStatus = {
+  ok?: boolean;
+  configured?: boolean;
+  scannedAt?: string | null;
+  dataThrough?: string | null;
+  spend?: { total: number; last30d: number; pulls: number };
+  limit?: number;
+  error?: string;
 };
 
 type StatsResult = {
@@ -35,8 +32,6 @@ type StatsResult = {
     total_r: number;
   };
 };
-
-type AgentStatus = { ok?: boolean; agent?: string };
 
 function StatusDot({ ok }: { ok: boolean }) {
   return (
@@ -63,40 +58,26 @@ function Row({ label, value, mono }: { label: string; value: React.ReactNode; mo
 }
 
 const ENV_VARS = [
-  { key: "OANDA_API_KEY", label: "OANDA API Key" },
-  { key: "OANDA_ACCOUNT_ID", label: "OANDA Account ID" },
-  { key: "OANDA_ACCOUNT_TYPE", label: "OANDA Account Type" },
+  { key: "DATABENTO_API_KEY", label: "Databento API Key" },
+  { key: "DATABENTO_MAX_COST_USD", label: "Databento per-scan limit" },
   { key: "ANTHROPIC_API_KEY", label: "Anthropic API Key" },
   { key: "AI_PROVIDER", label: "AI Provider override" },
   { key: "AI_MODEL_ANTHROPIC", label: "AI Model (grader)" },
-  { key: "AI_MODEL_SCANNER", label: "AI Model (scanner)" },
   { key: "DATABASE_URL", label: "Database URL" },
   { key: "SITE_PASSWORD", label: "Site Password" },
   { key: "SITE_AUTH_SECRET", label: "Auth Secret" },
-  { key: "N8N_STATUS_URL", label: "n8n Status URL" },
 ];
 
 export default function SettingsPage() {
-  const [oanda, setOanda] = useState<OandaSummary | null>(null);
-  const [oandaError, setOandaError] = useState<string | null>(null);
-  const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null);
+  const [futures, setFutures] = useState<FuturesStatus | null>(null);
   const [stats, setStats] = useState<StatsResult | null>(null);
   const [envStatus, setEnvStatus] = useState<Record<string, boolean>>({});
-  const [oandaType, setOandaType] = useState<string>("practice");
 
   useEffect(() => {
-    fetch("/api/oanda/account", { cache: "no-store" })
-      .then(async (res) => {
-        const data = await res.json();
-        if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
-        setOanda(data);
-      })
-      .catch((err) => setOandaError(err instanceof Error ? err.message : "Failed"));
-
-    fetch("/api/agent/status", { cache: "no-store" })
+    fetch("/api/futures/status", { cache: "no-store" })
       .then((r) => r.json())
-      .then((d) => setAgentStatus(d))
-      .catch(() => setAgentStatus({ ok: false, agent: "offline" }));
+      .then((d) => setFutures(d))
+      .catch(() => setFutures({ ok: false, error: "Failed to load" }));
 
     fetch("/api/settings/stats", { cache: "no-store" })
       .then((r) => r.json())
@@ -105,15 +86,12 @@ export default function SettingsPage() {
 
     fetch("/api/settings/env", { cache: "no-store" })
       .then((r) => r.json())
-      .then((d) => {
-        setEnvStatus(d?.vars ?? {});
-        if (d?.oanda_type) setOandaType(d.oanda_type);
-      })
+      .then((d) => setEnvStatus(d?.vars ?? {}))
       .catch(() => null);
   }, []);
 
-  const acct = oanda?.account;
-  const n8nOnline = agentStatus?.agent === "online";
+  const fmtCt = (v?: string | null) =>
+    v ? new Date(v).toLocaleString("en-US", { timeZone: "America/Chicago", dateStyle: "medium", timeStyle: "short" }) + " CT" : "—";
 
   const winRate = (() => {
     if (!stats?.journal) return null;
@@ -144,50 +122,33 @@ export default function SettingsPage() {
             {/* Connections */}
             <Section title="Connections">
               <div className="space-y-4">
-                {/* OANDA */}
+                {/* Databento */}
                 <div className="rounded-xl border border-white/10 bg-black/30 p-4">
                   <div className="flex items-center gap-2 mb-3">
-                    <StatusDot ok={!!acct} />
-                    <span className="text-sm text-white/80">OANDA</span>
-                    {acct ? (
-                      <span className="ml-auto rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-200">
-                        {oandaType.toUpperCase()}
-                      </span>
-                    ) : null}
+                    <StatusDot ok={!!futures?.configured && futures?.ok !== false} />
+                    <span className="text-sm text-white/80">Databento · CME Globex</span>
+                    <span className="ml-auto rounded-full border border-purple-400/30 bg-purple-500/10 px-2 py-0.5 text-[10px] text-purple-100">
+                      HISTORICAL · CREDIT
+                    </span>
                   </div>
-                  {oandaError ? (
-                    <div className="text-xs text-red-300">{oandaError}</div>
-                  ) : acct ? (
+                  {futures?.error ? (
+                    <div className="text-xs text-red-300">{futures.error}</div>
+                  ) : futures ? (
                     <div>
-                      <Row label="Account" value={acct.alias ?? acct.id ?? "—"} />
-                      <Row label="Currency" value={acct.currency ?? "—"} />
-                      <Row label="Balance" value={acct.balance ? `${acct.currency} ${Number(acct.balance).toLocaleString()}` : "—"} mono />
-                      <Row label="NAV" value={acct.NAV ? `${acct.currency} ${Number(acct.NAV).toLocaleString()}` : "—"} mono />
-                      <Row label="Unrealised P&L" value={acct.unrealizedPL ?? "—"} mono />
-                      <Row label="Open trades" value={acct.openTradeCount ?? "—"} />
-                      <Row label="Open positions" value={acct.openPositionCount ?? "—"} />
+                      <Row label="API key" value={futures.configured ? "Set" : "Missing — add DATABENTO_API_KEY"} />
+                      <Row label="Last scan" value={fmtCt(futures.scannedAt)} />
+                      <Row label="Data through" value={fmtCt(futures.dataThrough)} />
+                      <Row label="Credit used (all time)" value={`$${(futures.spend?.total ?? 0).toFixed(3)}`} mono />
+                      <Row label="Credit used (30 days)" value={`$${(futures.spend?.last30d ?? 0).toFixed(3)}`} mono />
+                      <Row label="Paid pulls" value={futures.spend?.pulls ?? 0} />
+                      <Row label="Per-scan limit" value={`$${(futures.limit ?? 1).toFixed(2)}`} mono />
                     </div>
                   ) : (
                     <div className="text-xs text-white/30">Loading...</div>
                   )}
-                </div>
-
-                {/* n8n */}
-                <div className="rounded-xl border border-white/10 bg-black/30 p-4">
-                  <div className="flex items-center gap-2">
-                    <StatusDot ok={n8nOnline} />
-                    <span className="text-sm text-white/80">n8n agent</span>
-                    <span className={`ml-auto text-xs ${n8nOnline ? "text-emerald-200" : "text-white/40"}`}>
-                      {n8nOnline ? "Online" : "Offline"}
-                    </span>
+                  <div className="mt-2 text-[11px] text-white/30">
+                    New accounts start with $125 of credit that expires after 6 months. Bars are cached, so each range is only paid for once.
                   </div>
-                  {n8nOnline ? (
-                    <div className="mt-2 text-xs text-white/40">Connected via N8N_STATUS_URL webhook.</div>
-                  ) : (
-                    <div className="mt-2 text-xs text-white/30">
-                      Set N8N_STATUS_URL in Vercel env vars, then POST from n8n to confirm connection.
-                    </div>
-                  )}
                 </div>
               </div>
             </Section>
@@ -199,7 +160,6 @@ export default function SettingsPage() {
                   <div className="mb-2 text-xs text-white/40">Configuration</div>
                   <Row label="Provider" value="Anthropic (Claude)" />
                   <Row label="Grader model" value="claude-opus-4-7 (default)" />
-                  <Row label="Scanner model" value="claude-sonnet-4-6 (default)" />
                   <Row label="OpenAI fallback" value="Available (set AI_PROVIDER=openai)" />
                 </div>
                 <div>

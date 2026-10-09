@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState } from "react";
 import Sidebar from "@/components/Sidebar";
 import Topbar from "@/components/Topbar";
-import type { PriceData } from "@/app/api/market/prices/route";
+import { FUTURES_SYMBOLS } from "@/lib/futures/symbols";
 
 // ─── Session config ────────────────────────────────────────────────────────────
 
@@ -181,7 +181,7 @@ function SessionClock({ sessionKey, utcH, utcM }: { sessionKey: SessionKey; utcH
 
 // ─── TradingView embed ────────────────────────────────────────────────────────
 
-function TVWidget({ type }: { type: "calendar" | "news" }) {
+function TVWidget({ type }: { type: "calendar" | "news" | "quotes" }) {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -200,13 +200,29 @@ function TVWidget({ type }: { type: "calendar" | "news" }) {
         height: "500",
         locale: "en",
         importanceFilter: "0,1",
-        currencyFilter: "USD,EUR,GBP,JPY,AUD,NZD,CAD,CHF",
+        currencyFilter: "USD",
+      });
+    } else if (type === "quotes") {
+      s.src = "https://s3.tradingview.com/external-embedding/embed-widget-market-quotes.js";
+      s.innerHTML = JSON.stringify({
+        colorTheme: "dark",
+        isTransparent: true,
+        width: "100%",
+        height: "260",
+        locale: "en",
+        showSymbolLogo: false,
+        symbolsGroups: [
+          {
+            name: "Futures",
+            symbols: FUTURES_SYMBOLS.map((f) => ({ name: f.tradingView, displayName: `${f.root} · ${f.name}` })),
+          },
+        ],
       });
     } else {
       s.src = "https://s3.tradingview.com/external-embedding/embed-widget-timeline.js";
       s.innerHTML = JSON.stringify({
         feedMode: "market",
-        market: "forex",
+        market: "futures",
         colorTheme: "dark",
         isTransparent: true,
         displayMode: "regular",
@@ -225,58 +241,9 @@ function TVWidget({ type }: { type: "calendar" | "news" }) {
   return (
     <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-6">
       <div className="mb-4 text-xs uppercase tracking-widest text-white/30">
-        {type === "calendar" ? "Economic Calendar" : "Market News"}
+        {type === "calendar" ? "Economic Calendar (USD)" : type === "quotes" ? "Futures" : "Market News"}
       </div>
       <div className="tradingview-widget-container" ref={ref} />
-    </div>
-  );
-}
-
-// ─── Live prices ──────────────────────────────────────────────────────────────
-
-const WATCHLIST = [
-  "EUR_USD","GBP_USD","USD_JPY","XAU_USD","GBP_JPY",
-  "AUD_USD","USD_CAD","USD_CHF","NZD_USD","XAG_USD",
-];
-
-function PriceCard({ price }: { price: PriceData }) {
-  const mid = (price.bid + price.ask) / 2;
-  const dp = price.instrument.includes("JPY") ? 3
-    : price.instrument.includes("XAU") || price.instrument.includes("XAG") ? 2
-    : price.instrument.includes("SPX") || price.instrument.includes("NAS") || price.instrument.includes("US30") || price.instrument.includes("UK100") || price.instrument.includes("DE30") ? 1
-    : 5;
-
-  return (
-    <div className={[
-      "rounded-2xl border p-4 transition",
-      price.tradeable
-        ? "border-white/10 bg-white/[0.03] hover:bg-white/[0.05]"
-        : "border-white/5 bg-white/[0.01] opacity-40",
-    ].join(" ")}>
-      <div className="flex items-start justify-between mb-3">
-        <div>
-          <div className="text-xs font-semibold text-white/90">
-            {price.instrument.replace("_", "/")}
-          </div>
-          {!price.tradeable && (
-            <div className="text-[9px] text-white/30 mt-0.5">Market closed</div>
-          )}
-        </div>
-        <div className={`text-[9px] rounded border px-1.5 py-0.5 ${
-          price.spreadPips < 1 ? "border-emerald-500/30 text-emerald-400/70"
-          : price.spreadPips < 3 ? "border-yellow-500/30 text-yellow-400/70"
-          : "border-red-500/30 text-red-400/70"
-        }`}>
-          {price.spreadPips}p
-        </div>
-      </div>
-      <div className="font-mono text-base text-white/90 tracking-tight">
-        {mid.toFixed(dp)}
-      </div>
-      <div className="mt-1 flex gap-2 text-[9px] text-white/30">
-        <span>B {price.bid.toFixed(dp)}</span>
-        <span>A {price.ask.toFixed(dp)}</span>
-      </div>
     </div>
   );
 }
@@ -285,26 +252,11 @@ function PriceCard({ price }: { price: PriceData }) {
 
 export default function MarketPage() {
   const [now, setNow] = useState(new Date());
-  const [prices, setPrices] = useState<PriceData[]>([]);
-  const [pricesAt, setPricesAt] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  const fetchPrices = useCallback(async () => {
-    try {
-      const res = await fetch(`/api/market/prices?instruments=${WATCHLIST.join(",")}`, { cache: "no-store" });
-      const data = await res.json();
-      if (data.ok) { setPrices(data.prices); setPricesAt(data.fetched_at); }
-    } finally {
-      setLoading(false);
-    }
-  }, []);
 
   useEffect(() => {
-    fetchPrices();
     const clock = setInterval(() => setNow(new Date()), 60000);
-    const priceTimer = setInterval(fetchPrices, 30000);
-    return () => { clearInterval(clock); clearInterval(priceTimer); };
-  }, [fetchPrices]);
+    return () => clearInterval(clock);
+  }, []);
 
   const utcH = now.getUTCHours();
   const utcM = now.getUTCMinutes();
@@ -334,15 +286,6 @@ export default function MarketPage() {
                   </span>
                 ))
               )}
-              <span className="ml-auto font-mono text-[10px] text-white/25">
-                {pricesAt ? `Prices updated ${new Date(pricesAt).toLocaleTimeString()}` : "Loading prices..."}
-              </span>
-              <button
-                onClick={fetchPrices}
-                className="rounded-lg border border-white/10 px-2 py-1 text-[10px] text-white/40 hover:text-white/70 transition"
-              >
-                Refresh
-              </button>
             </div>
 
             {/* Session Timeline */}
@@ -355,26 +298,8 @@ export default function MarketPage() {
               ))}
             </div>
 
-            {/* Live Prices */}
-            <div>
-              <div className="mb-3 text-xs uppercase tracking-widest text-white/30">Live Prices</div>
-              {loading ? (
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-                  {Array.from({ length: 10 }).map((_, i) => (
-                    <div key={i} className="rounded-2xl border border-white/5 bg-white/[0.02] h-24 animate-pulse" />
-                  ))}
-                </div>
-              ) : (
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-                  {prices.map((p) => <PriceCard key={p.instrument} price={p} />)}
-                  {prices.length === 0 && (
-                    <div className="col-span-5 text-xs text-white/30 text-center py-8">
-                      OANDA prices unavailable — check connection in Settings
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
+            {/* Futures quotes (TradingView, may be delayed) */}
+            <TVWidget type="quotes" />
 
             {/* Calendar + News side by side */}
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">

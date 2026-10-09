@@ -1,17 +1,14 @@
 import { NextResponse } from "next/server";
 
 const CHECKED_VARS = [
-  "OANDA_API_KEY",
-  "OANDA_ACCOUNT_ID",
-  "OANDA_ACCOUNT_TYPE",
+  "DATABENTO_API_KEY",
+  "DATABENTO_MAX_COST_USD",
   "ANTHROPIC_API_KEY",
   "AI_PROVIDER",
   "AI_MODEL_ANTHROPIC",
-  "AI_MODEL_SCANNER",
   "DATABASE_URL",
   "SITE_PASSWORD",
   "SITE_AUTH_SECRET",
-  "N8N_STATUS_URL",
 ];
 
 export async function GET() {
@@ -23,6 +20,5 @@ export async function GET() {
   return NextResponse.json({
     ok: true,
     vars,
-    oanda_type: process.env.OANDA_ACCOUNT_TYPE || "practice",
   });
 }

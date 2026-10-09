@@ -3,7 +3,7 @@
 import Sidebar from "@/components/Sidebar";
 import Topbar from "@/components/Topbar";
 import ChartPanel from "@/components/ChartPanel";
-import SignalPanel from "@/components/SignalPanel";
+import ScannerPanel from "@/components/ScannerPanel";
 
 export default function TerminalPage() {
   return (
@@ -22,7 +22,7 @@ export default function TerminalPage() {
               <ChartPanel />
             </div>
             <div className="lg:col-span-1">
-              <SignalPanel />
+              <ScannerPanel />
             </div>
           </div>
         </main>

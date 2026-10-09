@@ -242,3 +242,57 @@ CREATE TABLE IF NOT EXISTS notification_subscriptions (
   identifier  TEXT NOT NULL UNIQUE,
   active      BOOLEAN NOT NULL DEFAULT true
 );
+
+-- ─── Futures scanner ──────────────────────────────────────────────────────────
+
+-- Cached Databento OHLCV bars, so each bar is only paid for once
+CREATE TABLE IF NOT EXISTS futures_bars (
+  symbol    TEXT NOT NULL,
+  schema    TEXT NOT NULL,
+  ts        TIMESTAMPTZ NOT NULL,
+  open      DOUBLE PRECISION NOT NULL,
+  high      DOUBLE PRECISION NOT NULL,
+  low       DOUBLE PRECISION NOT NULL,
+  close     DOUBLE PRECISION NOT NULL,
+  volume    BIGINT NOT NULL,
+  PRIMARY KEY (symbol, schema, ts)
+);
+
+-- Which time ranges have been downloaded (bars are only emitted when trades occur,
+-- so the newest bar alone can't tell us what has already been paid for)
+CREATE TABLE IF NOT EXISTS futures_coverage (
+  symbol        TEXT NOT NULL,
+  schema        TEXT NOT NULL,
+  covered_from  TIMESTAMPTZ NOT NULL,
+  covered_until TIMESTAMPTZ NOT NULL,
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (symbol, schema)
+);
+
+-- Every paid Databento pull, to track how fast the credit is being used
+CREATE TABLE IF NOT EXISTS futures_fetch_log (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  symbol      TEXT NOT NULL,
+  schema      TEXT NOT NULL,
+  range_start TIMESTAMPTZ NOT NULL,
+  range_end   TIMESTAMPTZ NOT NULL,
+  rows        INT NOT NULL,
+  cost_usd    NUMERIC(10,6) NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS futures_fetch_log_created_at_idx ON futures_fetch_log(created_at DESC);
+
+-- One row per symbol per scan: the zones as they were computed
+CREATE TABLE IF NOT EXISTS futures_zone_snapshots (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  symbol        TEXT NOT NULL,
+  week_start    DATE NOT NULL,
+  week_end      DATE NOT NULL,
+  as_of         TIMESTAMPTZ NOT NULL,
+  last_price    DOUBLE PRECISION NOT NULL,
+  analysis_json JSONB NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS futures_zone_snapshots_symbol_idx ON futures_zone_snapshots(symbol, created_at DESC);

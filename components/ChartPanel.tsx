@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
+import { FUTURES_SYMBOLS } from "@/lib/futures/symbols";
 
 type Tf = "15" | "60" | "240" | "D";
 
@@ -11,25 +12,21 @@ const TF_LABELS: { label: string; value: Tf }[] = [
   { label: "1D", value: "D" },
 ];
 
-const PAIRS = [
-  { label: "AUD/USD", symbol: "OANDA:AUDUSD" },
-  { label: "EUR/USD", symbol: "OANDA:EURUSD" },
-  { label: "GBP/USD", symbol: "OANDA:GBPUSD" },
-  { label: "USD/JPY", symbol: "OANDA:USDJPY" },
-];
+const PAIRS = FUTURES_SYMBOLS.map((f) => ({ label: f.root, symbol: f.tradingView }));
 
 declare global {
   interface Window {
-    TradingView?: any;
+    TradingView?: { widget: new (config: Record<string, unknown>) => unknown };
   }
 }
 
 export default function ChartPanel() {
   const hostRef = useRef<HTMLDivElement>(null);
   const [symbol, setSymbol] = useState(PAIRS[0].symbol);
-  const [interval, setInterval] = useState<Tf>("60");
+  const [interval, setInterval] = useState<Tf>("15");
 
-  const containerId = useMemo(() => "tv_" + Math.random().toString(16).slice(2), []);
+  const reactId = useId();
+  const containerId = "tv_" + reactId.replace(/[^a-zA-Z0-9]/g, "");
 
   useEffect(() => {
     if (!hostRef.current) return;
@@ -64,7 +61,7 @@ export default function ChartPanel() {
         autosize: true,
         symbol,
         interval,
-        timezone: "Etc/UTC",
+        timezone: "America/Chicago",
         theme: "dark",
         style: "1",
         container_id: containerId,
@@ -80,7 +77,7 @@ export default function ChartPanel() {
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <span className="text-sm text-zinc-400">Pair</span>
+          <span className="text-sm text-zinc-400">Contract</span>
           <select
             value={symbol}
             onChange={(e) => setSymbol(e.target.value)}
