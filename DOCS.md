@@ -298,6 +298,14 @@ Weights were reset after the first real run (1,019 breaks): only the displacemen
 
 **Breakout Lab** (`lib/backtest/breakoutStudy.ts`, `lib/indicators/breakoutStats.ts`): walk-forward over cached bars with zones rebuilt each session. Outcome: *followed through* = 1 ATR beyond the break close within 8 bars before a 15m close back through the zone's far side; *failed* = the close-back came first. Each feature shows follow-through with vs without it; it's marked as mattering only with ≥ 30 breaks on each side and |z| ≥ 2.6 (strict, because a dozen features are tested together). The weights above are starting points — change them in `scoreBreak()` to match what the Lab shows on real data.
 
+### Failure tests
+
+`readFailure` / `failureOutcome` study the course's reversal setup: a 15m candle wicks through a zone and closes back inside. Worked = price moves 1 ATR back toward value before a 15m close beyond the wick. Features: RSI(14) divergence vs the last pivot, strong rejection close, volume, 1H trend, session. `runBreakoutStudy` returns `failures` alongside `rows`; the Lab shows them under "Failure tests — the course setup" (`failureSummary`, `explainFailures`).
+
+### TradingView indicator (`public/kinoe-breakout-quality.pine`)
+
+Pine v6 overlay "Kinoe BQ" that mirrors `scoreBreak` on 15m closes: STRONG / WEAK / TRAP labels, FT labels for failure tests (with RSI divergence), FVG boxes for displacement candles, faint zone rectangles, and alerts. Zones come from Scanner → "Copy for TradingView" (one per line: `top;bottom;R|S;name`) pasted into the Zones input; PDH/PDL and overnight high/low are built in. Install steps are on the My Strategy page. Keep weights in sync with `scoreBreak` when they change.
+
 ## Journal import (`lib/journal/`)
 
 | File | Responsibility |

@@ -27,8 +27,8 @@ export async function POST(req: NextRequest) {
       loadBarsRange(symbol.root, "ohlcv-1m", from - MINUTE_WARMUP_DAYS * DAY, to),
       loadBarsRange(symbol.root, "ohlcv-1h", from - HOURLY_WARMUP_DAYS * DAY, to),
     ]);
-    const { rows, sessions } = runBreakoutStudy({ symbol, minute, hourly, from, to });
-    return NextResponse.json({ ok: true, symbol: symbol.root, from, to, sessions, rows });
+    const { rows, failures, sessions } = runBreakoutStudy({ symbol, minute, hourly, from, to });
+    return NextResponse.json({ ok: true, symbol: symbol.root, from, to, sessions, rows, failures });
   } catch (err) {
     return NextResponse.json({ ok: false, error: err instanceof Error ? err.message : "Study failed" }, { status: 500 });
   }
