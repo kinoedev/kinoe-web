@@ -12,8 +12,7 @@ A private trading platform for futures price action. Scans MNQ, MES, MGC and MCL
 | **Charts** | Full-screen TradingView Advanced Chart with a futures quick switcher. Accepts `?symbol=CME_MINI:MNQ1!` deep links from the scanner. |
 | **Scanner** | Futures key-level zone scanner. Pulls CME data from Databento (cached), builds the weekly level set and 3–5 rectangle zones per contract, and ranks contracts by how close price is to a zone. |
 | **Backtest** | Walk-forward backtest of the 1H / 15m / 5m zone strategy (setups A and B) on cached CME 1-minute data. Win rate, expectancy, drawdown, equity curve, and a breakdown by setup, session, direction and contract. |
-| **Journal** | Manual trade entries. AI grades each entry on process, risk, and thesis quality. |
-| **Analytics** | Win rate, profit factor, equity curve, breakdown by symbol/setup/source. |
+| **Journal** | TradeZella-style journal: Tradovate imports (Performance PDF/CSV, Orders CSV), dashboard (stats, Kinoe score, cumulative P&L, P&L calendar), prop-firm tracker per account (balance, EOD-trailing drawdown floor, daily loss limit, profit target), reports (symbol, hour, weekday, hold time, playbook, mistakes, account), playbooks with rules checklists compared against backtests, daily notebook, per-trade review (playbook, rules followed, stop → R, rating, mistake/emotion tags) and AI grading. `/analytics` redirects to Journal → Reports. |
 | **Market** | Session timeline, TradingView futures quotes, USD economic calendar, futures news. |
 | **Settings** | Databento status and credit used, AI spend, journal stats, env var health check. |
 
@@ -153,6 +152,16 @@ The script is idempotent — every `CREATE` uses `IF NOT EXISTS`. Safe to re-run
 
 The forex-era `agent_*` tables are left in place (not dropped) so historic data is kept; nothing writes to them any more.
 
+**`trading_accounts`** — prop/broker accounts: size, profit target, daily loss limit, max drawdown + type (EOD trailing / static), fee rates for CSV imports, status (evaluation, funded, blown…).
+
+**`trade_imports`** — one row per upload (file name, format, trades added, duplicates skipped). Deleting one removes the trades it added.
+
+**`playbooks`** — strategies with a rules checklist; optionally linked to backtest setup A or B. Two starter playbooks are created on first use.
+
+**`daily_notes`** — pre-market plan, post-session review, mood, rating, followed-plan per CME trading day.
+
+`journal_entries` gained: `account_id`, `import_id`, `import_hash` (unique — re-importing skips existing trades), `quantity`, `gross_pnl`, `fees`, `trading_day`, `duration_sec`, `executions_json`, `playbook_id`, `rules_followed`, `rating`. `pnl` is net of fees.
+
 **`ai_analyses`** — audit log of every AI call. Stores prompt, response, token counts, and cost. Used by Settings page to show all-time AI spend. Will feed bot training data later.
 
 ---
@@ -225,6 +234,12 @@ The grader evaluates: process quality, risk management, thesis clarity, emotiona
 | POST | `/api/futures/scan` | Download new bars (cached) and recompute zones. Body `{ symbols?: string[], confirm?: boolean }`. Returns `409 { needsConfirm, estimate }` when the estimate is over `DATABENTO_MAX_COST_USD`. |
 | POST | `/api/backtest/data` | Download/caches the history a backtest needs. Body `{ symbol, days, confirm? }`. `409 needsConfirm` above the credit limit. |
 | POST | `/api/backtest/run` | Run the backtest on cached bars and save it. Body `{ symbol, days, params? }`. |
+| GET/POST | `/api/journal/accounts` | List / create trading accounts. `PATCH /api/journal/accounts/[id]` updates one. |
+| GET/POST/DELETE | `/api/journal/import` | Recent imports · import `{ accountId, files: [{ name, text or base64 }], dryRun? }` · `?id=` undo |
+| GET | `/api/journal/trades` | Closed trades `?account=&from=&to=` + accounts, playbooks, note days |
+| GET/PUT | `/api/journal/notes/[day]` | Daily notebook entry + that day's trades |
+| GET/POST | `/api/journal/playbooks` | Playbooks + latest backtest stats for linked setups · create/update |
+| PATCH | `/api/journal/[id]/review` | Playbook, rules followed, rating, setup, stop (recomputes R) |
 | GET | `/api/backtest` | Recent runs, or one full run with `?id=` |
 | GET | `/api/futures/status` | Sidebar/Settings status: key configured, last scan, data-through time, credit used |
 | GET | `/api/analytics/performance` | Win rate, R totals, equity curve, breakdown by pair/setup/source |
@@ -261,6 +276,25 @@ R is measured against the risk at the actual fill. `stats.ts` computes win rate,
 
 ---
 
+## Journal import (`lib/journal/`)
+
+| File | Responsibility |
+|---|---|
+| `pdf.ts` | Tradovate **Performance PDF** → pair rows (unpdf text extraction, row regex) + the report's Gross P/L, fees and trade count |
+| `import.ts` | CSV parsing; Tradovate **Performance CSV** → pair rows; **Orders/fills CSV** → FIFO round trips + initial stop (from stop orders) |
+| `ingest.ts` | Multi-file uploads: merges overlapping exports (each distinct row keeps its highest count in any one file — identical fills can be real), then builds trades once |
+| `store.ts` | Accounts, imports (dedupe by `import_hash`), trades, notes, playbooks, review updates |
+| `stats.ts` | Summary, daily P&L, Kinoe score, breakdowns, prop-firm status |
+| `time.ts` / `contracts.ts` / `format.ts` | Timezone parsing, CME trading day, contract point values, display formatting |
+
+- Pair rows are rebuilt into fills and grouped **flat-to-flat** per symbol, so scale-ins/outs become one trade. Trade count is lower than Tradovate's row count.
+- P&L is recomputed from prices × point value and cross-checked against the file's own P&L; the import preview shows a ✓ per file when it matches the report.
+- PDF reports state total fees only: they're spread per contract and rounded cumulatively so the cents add up to the report total exactly. CSV imports use the account's fee rates (editable; changing them re-prices that account's CSV trades).
+- Timestamps are read in the account's timezone (default America/Chicago). Trading day = CME session (17:00 CT rolls to the next day; weekend sessions to Monday) — matches how prop firms count days.
+- Prop status is from closed trades: EOD trailing floor = max(start − DD, highest EOD balance − DD). Firm-specific trail locks aren't modelled.
+
+---
+
 ## Removed in the futures switch
 
 The forex agent (OANDA candles, Naked Forex pattern engine, Telegram approve/deny, OANDA stop orders, close-check) was removed. `/signals` and `/agent` redirect to `/scanner`.
@@ -282,10 +316,9 @@ kinoe-web/
 │   │   ├── futures/status/       # Databento status + credit used
 │   │   ├── journal/              # CRUD + AI grader
 │   │   └── settings/             # Env health + spend stats
-│   ├── analytics/page.tsx        # Performance analytics
 │   ├── backtest/page.tsx         # Backtest UI — controls, stats, equity curve, trades
 │   ├── charts/page.tsx           # Full-screen TradingView chart (futures switcher, deep links)
-│   ├── journal/                  # List, new entry, single entry pages
+│   ├── journal/                  # Dashboard, trades, reports, playbooks, day/[date] notebook, import, accounts, [id] trade, new
 │   ├── login/page.tsx            # Password login
 │   ├── market/page.tsx           # Sessions, futures quotes, calendar, news
 │   ├── scanner/page.tsx          # Zone scanner UI
@@ -303,6 +336,7 @@ kinoe-web/
 │
 ├── lib/
 │   ├── backtest/                 # engine.ts (walk-forward sim), stats.ts, news.ts, data.ts
+│   ├── journal/                  # import (PDF/CSV), ingest, store, stats, time, contracts, format
 │   ├── ai/                       # Journal grader (Anthropic / OpenAI), pricing, prompts
 │   ├── db/                       # Neon client, migration runner, queries, schema, types
 │   ├── futures/                  # Databento client, bar cache, sessions, symbols, scanner
