@@ -1,5 +1,6 @@
 "use client";
 
+import { safeJson } from "@/lib/http";
 import { useEffect, useState } from "react";
 import JournalShell from "@/components/journal/JournalShell";
 import AccountForm from "@/components/journal/AccountForm";
@@ -21,7 +22,7 @@ export default function AccountsPage() {
 
   const load = () =>
     fetch("/api/journal/accounts", { cache: "no-store" })
-      .then((r) => r.json())
+      .then(safeJson)
       .then((d) => (d.ok ? setAccounts(d.accounts) : setError(d.error)))
       .catch(() => setError("Failed to load accounts"));
 

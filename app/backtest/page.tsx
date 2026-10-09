@@ -1,5 +1,6 @@
 "use client";
 
+import { safeJson } from "@/lib/http";
 import { useEffect, useMemo, useRef, useState } from "react";
 import Sidebar from "@/components/Sidebar";
 import Topbar from "@/components/Topbar";
@@ -326,7 +327,7 @@ export default function BacktestPage() {
 
   const loadRecent = () =>
     fetch("/api/backtest", { cache: "no-store" })
-      .then((r) => r.json())
+      .then(safeJson)
       .then((d) => {
         if (d.ok) {
           setRecent(d.runs);
@@ -356,7 +357,7 @@ export default function BacktestPage() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ symbol: sym, days, confirm: confirmSpend }),
-        }).then((r) => r.json());
+        }).then(safeJson);
         if (!d.ok) {
           if (d.needsConfirm) {
             setConfirm({ message: d.message });
@@ -369,7 +370,7 @@ export default function BacktestPage() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ symbol: sym, days, params }),
-        }).then((r) => r.json());
+        }).then(safeJson);
         if (!res.ok) throw new Error(res.error ?? `${sym}: backtest failed`);
         allTrades.push(...res.result.trades);
         for (const k of Object.keys(allSkips) as (keyof SkipCounts)[]) allSkips[k] += res.result.skips[k] ?? 0;
@@ -396,7 +397,7 @@ export default function BacktestPage() {
 
   const loadRun = async (id: string) => {
     setError(null);
-    const d = await fetch(`/api/backtest?id=${id}`, { cache: "no-store" }).then((r) => r.json());
+    const d = await fetch(`/api/backtest?id=${id}`, { cache: "no-store" }).then(safeJson);
     if (!d.ok) return setError(d.error ?? "Failed to load run");
     const r = d.run;
     setTrades(r.trades_jsonb ?? []);

@@ -1,5 +1,6 @@
 "use client";
 
+import { safeJson } from "@/lib/http";
 import { useEffect, useState, use } from "react";
 import { useRouter } from "next/navigation";
 import Sidebar from "@/components/Sidebar";
@@ -41,7 +42,7 @@ export default function JournalEntryPage({
   useEffect(() => {
     fetch(`/api/journal/${id}`, { cache: "no-store" })
       .then(async (res) => {
-        const data = await res.json();
+        const data = await safeJson(res);
         if (!res.ok || !data?.ok) throw new Error(data?.error || "Failed to load");
         setEntry(data.entry);
         setOutcome((data.entry.outcome ?? "") as Outcome | "");
@@ -78,7 +79,7 @@ export default function JournalEntryPage({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(patch),
       });
-      const data = await res.json();
+      const data = await safeJson(res);
       if (!res.ok || !data?.ok) throw new Error(data?.error || `Failed to save (HTTP ${res.status})`);
       setEntry(data.entry);
       setSavedAt(Date.now());
@@ -94,7 +95,7 @@ export default function JournalEntryPage({
     setAnalyzeError(null);
     try {
       const res = await fetch(`/api/journal/${id}/analyze`, { method: "POST" });
-      const data = await res.json();
+      const data = await safeJson(res);
       if (!res.ok || !data?.ok) throw new Error(data?.error || `HTTP ${res.status}`);
       setEntry(data.entry);
       setAnalyzeMeta({

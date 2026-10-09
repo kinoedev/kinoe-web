@@ -1,5 +1,6 @@
 "use client";
 
+import { safeJson } from "@/lib/http";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import JournalShell from "@/components/journal/JournalShell";
@@ -23,7 +24,7 @@ function Editor({ pb, onSaved, onCancel }: { pb?: Playbook; onSaved: () => void;
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id: pb?.id, name, description_md: desc, rules: rules.split("\n"), backtest_setup: setup || null }),
     });
-    const d = await res.json();
+    const d = await safeJson(res);
     if (!d.ok) return setErr(d.error);
     onSaved();
   };
@@ -80,7 +81,7 @@ export default function PlaybooksPage() {
 
   const loadBacktest = () =>
     fetch("/api/journal/playbooks", { cache: "no-store" })
-      .then((r) => r.json())
+      .then(safeJson)
       .then((d) => d.ok && setBacktest(d.backtest));
   useEffect(() => {
     loadBacktest();

@@ -1,5 +1,6 @@
 "use client";
 
+import { safeJson } from "@/lib/http";
 import { useCallback, useEffect, useState } from "react";
 import type { JournalTrade, Playbook, TradingAccount } from "@/lib/journal/store";
 
@@ -94,7 +95,7 @@ export function useJournal() {
       if (from) q.set("from", from);
       if (to) q.set("to", to);
       const res = await fetch(`/api/journal/trades?${q}`, { cache: "no-store" });
-      const d = await res.json();
+      const d = await safeJson(res);
       if (!d.ok) throw new Error(d.error ?? "Failed to load");
       setData({ trades: d.trades, accounts: d.accounts, playbooks: d.playbooks, notes: d.notes });
     } catch (e) {

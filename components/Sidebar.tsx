@@ -34,6 +34,7 @@ export default function Sidebar() {
 
   const navItems = [
     { label: "Terminal", href: "/terminal" },
+    { label: "My Strategy", href: "/strategy" },
     { label: "Charts", href: "/charts" },
     { label: "Scanner", href: "/scanner" },
     { label: "Backtest", href: "/backtest" },

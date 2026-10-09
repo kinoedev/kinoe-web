@@ -1,5 +1,6 @@
 "use client";
 
+import { safeJson } from "@/lib/http";
 import { useEffect, useState } from "react";
 import type { JournalEntry } from "@/lib/db/types";
 import type { Playbook } from "@/lib/journal/store";
@@ -79,7 +80,7 @@ export function TradeReview({ entry, onChange }: { entry: JournalEntry; onChange
 
   useEffect(() => {
     fetch("/api/journal/playbooks", { cache: "no-store" })
-      .then((r) => r.json())
+      .then(safeJson)
       .then((d) => d.ok && setPlaybooks(d.playbooks));
   }, []);
 
@@ -89,7 +90,7 @@ export function TradeReview({ entry, onChange }: { entry: JournalEntry; onChange
   const review = async (patch: Record<string, unknown>) => {
     setStatus("Saving…");
     const res = await fetch(`/api/journal/${entry.id}/review`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) });
-    const d = await res.json();
+    const d = await safeJson(res);
     if (d.ok) {
       onChange(d.entry);
       setStatus("Saved");
@@ -101,7 +102,7 @@ export function TradeReview({ entry, onChange }: { entry: JournalEntry; onChange
     else cur.add(value);
     setStatus("Saving…");
     const res = await fetch(`/api/journal/${entry.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ [field]: [...cur] }) });
-    const d = await res.json();
+    const d = await safeJson(res);
     if (d.ok) {
       onChange(d.entry);
       setStatus("Saved");
