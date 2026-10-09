@@ -1,5 +1,6 @@
 "use client";
 
+import { safeJson } from "@/lib/http";
 import Link from "next/link";
 import { use, useEffect, useState } from "react";
 import JournalShell from "@/components/journal/JournalShell";
@@ -25,7 +26,7 @@ export default function DayPage({ params }: { params: Promise<{ date: string }> 
 
   useEffect(() => {
     fetch(`/api/journal/notes/${date}`, { cache: "no-store" })
-      .then((r) => r.json())
+      .then(safeJson)
       .then((d) => {
         if (!d.ok) throw new Error(d.error);
         setTrades(d.trades);
@@ -42,7 +43,7 @@ export default function DayPage({ params }: { params: Promise<{ date: string }> 
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(note),
     });
-    const d = await res.json();
+    const d = await safeJson(res);
     if (!d.ok) return setError(d.error ?? "Save failed");
     setSaved(new Date().toLocaleTimeString());
   };

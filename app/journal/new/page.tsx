@@ -1,5 +1,6 @@
 "use client";
 
+import { safeJson } from "@/lib/http";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Sidebar from "@/components/Sidebar";
@@ -68,7 +69,7 @@ export default function NewJournalEntryPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      const data = await res.json();
+      const data = await safeJson(res);
       if (!res.ok || !data?.ok) throw new Error(data?.error || "Failed to save");
       router.replace(`/journal/${data.entry.id}`);
     } catch (err) {

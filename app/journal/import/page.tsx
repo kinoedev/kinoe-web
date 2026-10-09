@@ -1,5 +1,6 @@
 "use client";
 
+import { safeJson } from "@/lib/http";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import JournalShell from "@/components/journal/JournalShell";
@@ -65,7 +66,7 @@ export default function ImportPage() {
 
   const loadAccounts = () =>
     fetch("/api/journal/accounts", { cache: "no-store" })
-      .then((r) => r.json())
+      .then(safeJson)
       .then((d) => {
         if (!d.ok) return;
         setAccounts(d.accounts);
@@ -73,7 +74,7 @@ export default function ImportPage() {
       });
   const loadImports = () =>
     fetch("/api/journal/import", { cache: "no-store" })
-      .then((r) => r.json())
+      .then(safeJson)
       .then((d) => d.ok && setImports(d.imports));
 
   useEffect(() => {
@@ -101,7 +102,7 @@ export default function ImportPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ accountId, dryRun, files: files.map(({ name, text, base64 }) => ({ name, text, base64 })) }),
       });
-      const d = await res.json();
+      const d = await safeJson(res);
       if (!d.ok) throw new Error(d.error ?? "Import failed");
       if (dryRun) setPreview(d.preview);
       else {

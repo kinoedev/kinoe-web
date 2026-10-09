@@ -275,33 +275,39 @@ export function readBreak(ctx: BreakoutContext, i: number, dir: Dir, levelName: 
   const session = sessionOf(minutes[i]);
 
   const features: BreakFeatures = { bodyAtr, closeLocation, displacement, fvg, relVol: rv, sweptOppositeFirst, sweepOnBreak, drawAhead, divergence, trend, session };
-  const { score, reasons } = scoreBreak(features);
-  const quality: Quality = sweepOnBreak || score < 40 ? "TRAP" : score >= 65 ? "STRONG" : "WEAK";
+  const { score, quality, reasons } = scoreBreak(features);
   return { ts: b.ts + M15, dir, price: b.close, level: levelName, score, quality, reasons, features };
 }
 
-/** Starting weights. The Breakout Lab measures each one on real history — adjust these from its results. */
-export function scoreBreak(f: BreakFeatures): { score: number; reasons: { text: string; good: boolean }[] } {
+/**
+ * Weights from the first Breakout Lab run on real data (Oct 2026: 1,019 breaks over 60 days on
+ * MNQ/MES/MGC/MCL). Only the displacement candle separated winners from losers (63% vs 48%
+ * follow-through); everything else was within noise, so it carries little weight and shows up
+ * mainly as context. Re-run the Lab and adjust as more history accumulates.
+ */
+export function scoreBreak(f: BreakFeatures): { score: number; quality: Quality; reasons: { text: string; good: boolean }[] } {
   let s = 50;
   const reasons: { text: string; good: boolean }[] = [];
   const add = (pts: number, text: string) => {
     s += pts;
     reasons.push({ text, good: pts > 0 });
   };
-  if (f.displacement) add(15, "displacement candle");
-  else if (f.bodyAtr < 0.5) add(-10, "small body");
-  if (f.fvg) add(10, "left a fair value gap");
+  if (f.displacement) add(25, "displacement candle");
+  else if (f.bodyAtr < 0.5) add(-15, "small body");
+  if (!f.displacement && f.closeLocation < 0.5) add(-10, "closed off its extreme");
+  if (f.fvg) add(3, "left a fair value gap");
   if (f.relVol !== null) {
-    if (f.relVol >= 1.5) add(15, `${f.relVol.toFixed(1)}× normal volume`);
-    else if (f.relVol < 0.8) add(-10, `low volume (${f.relVol.toFixed(1)}×)`);
+    if (f.relVol >= 1.5) add(3, `${f.relVol.toFixed(1)}× normal volume`);
+    else if (f.relVol < 0.8) add(-3, `low volume (${f.relVol.toFixed(1)}×)`);
   }
-  if (f.sweptOppositeFirst) add(10, `swept ${f.sweptOppositeFirst} first`);
-  if (f.sweepOnBreak) add(-25, `only wicked ${f.sweepOnBreak}`);
-  if (f.drawAhead) add(5, `${f.drawAhead} ahead`);
-  if (f.divergence) add(-15, "stochastic divergence");
-  if (f.trend === "WITH") add(10, "with 1H trend");
-  if (f.trend === "AGAINST") add(-10, "against 1H trend");
-  return { score: Math.max(0, Math.min(100, Math.round(s))), reasons };
+  if (f.sweptOppositeFirst) add(2, `swept ${f.sweptOppositeFirst} first`);
+  if (f.sweepOnBreak) add(-3, `only wicked ${f.sweepOnBreak}`);
+  if (f.trend === "WITH") add(2, "with 1H trend");
+  if (f.trend === "AGAINST") add(-2, "against 1H trend");
+  const score = Math.max(0, Math.min(100, Math.round(s)));
+  // Strong needs a displacement candle; trap = small or weak-closing candle.
+  const quality: Quality = score >= 70 ? "STRONG" : score <= 35 ? "TRAP" : "WEAK";
+  return { score, quality, reasons };
 }
 
 // ── Outcome (for the study) ─────────────────────────────────────────────────

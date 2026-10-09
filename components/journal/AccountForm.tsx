@@ -1,5 +1,6 @@
 "use client";
 
+import { safeJson } from "@/lib/http";
 import { useState } from "react";
 import type { TradingAccount } from "@/lib/journal/store";
 
@@ -74,7 +75,7 @@ export default function AccountForm({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(d),
       });
-      const j = await res.json();
+      const j = await safeJson(res);
       if (!j.ok) throw new Error(j.error ?? "Save failed");
       onSaved(j.account);
     } catch (err) {

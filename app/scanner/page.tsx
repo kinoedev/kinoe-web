@@ -1,5 +1,6 @@
 "use client";
 
+import { safeJson } from "@/lib/http";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Sidebar from "@/components/Sidebar";
 import Topbar from "@/components/Topbar";
@@ -290,11 +291,12 @@ export default function ScannerPage() {
   const [errors, setErrors] = useState<{ symbol: string; error: string }[]>([]);
   const [confirm, setConfirm] = useState<{ estimate: number; message: string } | null>(null);
   const [lastScan, setLastScan] = useState<string | null>(null);
+  const [progress, setProgress] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
       const res = await fetch("/api/futures/scan", { cache: "no-store" });
-      const data = (await res.json()) as LoadResponse;
+      const data = (await safeJson(res)) as LoadResponse;
       if (!data.ok) throw new Error(data.error ?? "Failed to load");
       setResults(data.results ?? []);
       setSavedAt(data.savedAt ?? null);
@@ -315,30 +317,47 @@ export default function ScannerPage() {
     setError(null);
     setConfirm(null);
     try {
-      const res = await fetch("/api/futures/scan", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ confirm: confirmSpend }),
-      });
-      const data = (await res.json()) as ScanResponse;
-      if (!data.ok) {
-        if (data.needsConfirm && data.estimate !== undefined) {
-          setConfirm({ estimate: data.estimate, message: data.message ?? "" });
-          return;
+      // One contract per request keeps each call well inside Vercel's time limit.
+      const symbols = ["MNQ", "MES", "MGC", "MCL"];
+      const out: ScannerResult[] = [];
+      const errs: { symbol: string; error: string }[] = [];
+      let rows = 0;
+      let cost = 0;
+      let through = "";
+      let latestSpend = { total: 0, last30d: 0 };
+      for (const sym of symbols) {
+        setProgress(`${sym}…`);
+        const res = await fetch("/api/futures/scan", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ symbols: [sym], confirm: confirmSpend }),
+        });
+        const data = (await safeJson(res)) as ScanResponse;
+        if (!data.ok) {
+          if (data.needsConfirm && data.estimate !== undefined) {
+            setConfirm({ estimate: data.estimate, message: data.message ?? "" });
+            return;
+          }
+          errs.push({ symbol: sym, error: data.error ?? "Scan failed" });
+          continue;
         }
-        throw new Error(data.error ?? "Scan failed");
+        out.push(...data.results);
+        errs.push(...data.errors);
+        rows += data.spend.rowsDownloaded;
+        cost += data.spend.thisScan;
+        through = data.dataThrough;
+        latestSpend = { total: data.spend.total, last30d: data.spend.last30d };
+        setResults((cur) => [...cur.filter((r) => !data.results.some((n) => n.symbol === r.symbol)), ...data.results]);
       }
-      setResults(data.results);
-      setErrors(data.errors);
-      setSavedAt(data.scannedAt);
-      setSpend({ total: data.spend.total, last30d: data.spend.last30d });
-      setLastScan(
-        `Data through ${ct(data.dataThrough)} · ${data.spend.rowsDownloaded.toLocaleString()} new bars · ${money(data.spend.thisScan)} credit`
-      );
+      setErrors(errs);
+      setSavedAt(new Date().toISOString());
+      setSpend(latestSpend);
+      if (through) setLastScan(`Data through ${ct(through)} · ${rows.toLocaleString()} new bars · ${money(cost)} credit`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Scan failed");
     } finally {
       setScanning(false);
+      setProgress(null);
     }
   };
 
@@ -381,7 +400,7 @@ export default function ScannerPage() {
                 disabled={scanning}
                 className="ml-auto rounded-xl border border-purple-400/50 bg-purple-500/20 px-4 py-2 text-sm text-purple-50 transition hover:bg-purple-500/30 disabled:opacity-50"
               >
-                {scanning ? "Scanning…" : "Run scan"}
+                {scanning ? `Scanning ${progress ?? "…"}` : "Run scan"}
               </button>
             </div>
 

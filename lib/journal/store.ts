@@ -261,6 +261,8 @@ export async function listTrades(opts: { accountId?: string | null; from?: strin
            duration_sec, mistake_tags, emotion_tags, rules_followed, rating, ai_grade, source
     FROM journal_entries
     WHERE outcome IN ('WIN','LOSS','BE')
+      -- old forex agent trades (OANDA era) aren't part of the futures journal
+      AND source <> 'agent'
       AND (${opts.accountId ?? null}::uuid IS NULL OR account_id = ${opts.accountId ?? null}::uuid)
       AND (${opts.from ?? null}::date IS NULL OR trading_day >= ${opts.from ?? null}::date)
       AND (${opts.to ?? null}::date IS NULL OR trading_day <= ${opts.to ?? null}::date)
@@ -324,7 +326,7 @@ export type Playbook = {
 
 export async function listPlaybooks(): Promise<Playbook[]> {
   return (await sql`
-    SELECT id, name, description_md, rules, backtest_setup, archived FROM playbooks ORDER BY archived, created_at
+    SELECT id, name, description_md, rules, backtest_setup, archived FROM playbooks ORDER BY archived, name
   `) as Playbook[];
 }
 

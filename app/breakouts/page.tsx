@@ -1,11 +1,12 @@
 "use client";
 
+import { safeJson } from "@/lib/http";
 import { useMemo, useState } from "react";
 import Sidebar from "@/components/Sidebar";
 import Topbar from "@/components/Topbar";
 import { FUTURES_SYMBOLS } from "@/lib/futures/symbols";
 import { scoreBreak, type Quality } from "@/lib/indicators/breakout";
-import { significant, studySummary, type Bucket, type StudyRow } from "@/lib/indicators/breakoutStats";
+import { explainStudy, significant, studySummary, type Bucket, type StudyRow } from "@/lib/indicators/breakoutStats";
 
 const QUALITY_STYLE: Record<Quality, string> = {
   STRONG: "border-emerald-400/40 bg-emerald-500/10 text-emerald-100",
@@ -59,7 +60,7 @@ export default function BreakoutLabPage() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ symbol: sym, days, confirm: confirmSpend }),
-        }).then((r) => r.json());
+        }).then(safeJson);
         if (!d.ok) {
           if (d.needsConfirm) return setConfirm(d.message);
           throw new Error(d.error ?? `${sym}: download failed`);
@@ -69,7 +70,7 @@ export default function BreakoutLabPage() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ symbol: sym, days }),
-        }).then((r) => r.json());
+        }).then(safeJson);
         if (!s.ok) throw new Error(s.error ?? `${sym}: study failed`);
         all.push(...s.rows);
       }
@@ -82,8 +83,11 @@ export default function BreakoutLabPage() {
     }
   };
 
-  const summary = useMemo(() => (rows ? studySummary(rows) : null), [rows]);
-  const recent = useMemo(() => (rows ? [...rows].sort((a, b) => b.ts - a.ts).slice(0, 15) : []), [rows]);
+  // Labels are recomputed from the features so every run reflects the current weights.
+  const relabelled = useMemo(() => rows?.map((r) => ({ ...r, ...scoreBreak(r.features) })) ?? null, [rows]);
+  const summary = useMemo(() => (relabelled ? studySummary(relabelled) : null), [relabelled]);
+  const plain = useMemo(() => (summary ? explainStudy(summary) : null), [summary]);
+  const recent = useMemo(() => (relabelled ? [...relabelled].sort((a, b) => b.ts - a.ts).slice(0, 15) : []), [relabelled]);
 
   return (
     <div className="min-h-screen bg-black text-white">
@@ -150,10 +154,45 @@ export default function BreakoutLabPage() {
 
             {summary ? (
               <>
-                <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white/80">
-                  {summary.overall.n} zone breaks · <b className="text-white">{pct(summary.overall.follow)}</b> followed through, {pct(summary.overall.fail)} failed
-                  <span className="text-white/40"> · the white tick on each bar is this baseline</span>
-                </div>
+                {plain ? (
+                  <div className="space-y-4 rounded-2xl border border-purple-500/30 bg-gradient-to-br from-purple-950/40 to-black p-5">
+                    <div className="text-[10px] uppercase tracking-widest text-purple-200/70">What this means</div>
+                    <p className="text-sm leading-6 text-white/85">{plain.headline}</p>
+                    <p className="text-sm leading-6 text-white/70">{plain.label}</p>
+                    {plain.helps.length || plain.warns.length ? (
+                      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                        {[...plain.helps.map((h) => ({ ...h, good: true })), ...plain.warns.map((w) => ({ ...w, good: false }))].map((x) => (
+                          <div key={x.feature} className={`rounded-xl border p-3 ${x.good ? "border-emerald-400/30 bg-emerald-500/[0.06]" : "border-red-400/30 bg-red-500/[0.06]"}`}>
+                            <div className={`text-xs font-medium ${x.good ? "text-emerald-200" : "text-red-200"}`}>
+                              {x.good ? "Rule to keep" : "Warning sign"} · {x.feature}
+                            </div>
+                            <div className="mt-1 text-sm text-white/85">{x.rule}</div>
+                            <div className="mt-1 text-[11px] text-white/45">
+                              {x.what}. {x.detail}.
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-white/60">No single feature clearly separates good breaks from bad ones yet.</p>
+                    )}
+                    {plain.unclear.length ? (
+                      <div className="text-xs text-white/50">
+                        <div className="mb-1 text-white/60">Interesting but not proven:</div>
+                        <ul className="list-disc space-y-0.5 pl-5">
+                          {plain.unclear.map((u) => (
+                            <li key={u}>{u}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+                    {plain.caveat ? <div className="text-[11px] text-white/40">{plain.caveat}</div> : null}
+                    <div className="text-[11px] text-white/35">
+                      Everything not listed above moved the result by less than chance would — it&apos;s noise on these contracts. Details below; the white tick on each bar is
+                      the {pct(summary.overall.follow)} baseline.
+                    </div>
+                  </div>
+                ) : null}
 
                 <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.4fr)]">
                   <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">

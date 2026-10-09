@@ -1,5 +1,6 @@
 "use client";
 
+import { safeJson } from "@/lib/http";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import type { ScannerResult } from "@/lib/futures/scanner";
@@ -20,7 +21,7 @@ export default function ScannerPanel() {
 
   useEffect(() => {
     fetch("/api/futures/scan", { cache: "no-store" })
-      .then((r) => r.json())
+      .then(safeJson)
       .then((d) => {
         if (!d.ok) throw new Error(d.error ?? "Failed to load");
         setResults(
